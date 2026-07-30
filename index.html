@@ -134,7 +134,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact estimate exports</b> for import into the JACK App. <span style="opacity:.7">(build 38)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 43)</span></span>
   </div>
 </header>
 
@@ -146,7 +146,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <select id="tpl">
       <option value="auto">Auto-detect from headers</option>
     </select>
-    <div style="font-size:12px;color:var(--steel);margin:6px 0 2px">Built for <b>Buildxact</b> estimate exports. Other templates are coming soon.</div>
+    <div style="font-size:12px;color:var(--steel);margin:6px 0 2px">Built for <b>Buildxact</b> exports, plus <b>Xero</b> contact exports (pick Suppliers or Contractors to split the S/C column). More coming soon.</div>
     <label for="src">Data (copy straight from Excel, headers included)</label>
     <textarea id="src" spellcheck="false" placeholder="Paste rows here, e.g.
 
@@ -183,8 +183,8 @@ Slab pour		10/01/2026	1"></textarea>
       <button class="btn btn-small" id="delblank">Delete those rows</button>
     </div>
     <div class="phasebar" id="headingbar">
-      <span>⚠ <b id="headingcount"></b> row(s) look like <b>section headings</b> (no price/qty). Review before importing.</span>
-      <button class="btn btn-small" id="delheadings">Delete all headings</button>
+      <span>⚠ <b id="headingcount"></b> row(s) flagged for review: <b>section headings, blank items, or separators</b>. Nothing is deleted automatically - review, then remove if needed.</span>
+      <button class="btn btn-small" id="delheadings">Delete all flagged</button>
     </div>
     <div class="phasebar" id="mkbar">
       <span id="mkmsg"></span>
@@ -236,24 +236,24 @@ const TEMPLATES = {
     cols:{Name:"proper",Email:"email",Mobile:"phone",Street_Address:"proper",Suburb_Town:"proper",Postcode:"postcode",State:"state"}
   },
   "contractors": {
-    name:"Contractors",
+    name:"Contractors Contacts",
     headers:["Trading_Name","Type","ABN","Registered_For_GST","Email","Phone","Website","Street_Address","Suburb_Town","Postcode","State","Contact1_First_Name","Contact1_Last_Name","Contact1_Email","Contact1_Mobile","Contact1_Job_Title","Contact2_First_Name","Contact2_Last_Name","Contact2_Email","Contact2_Mobile","Contact2_Job_Title"],
     required:["Trading_Name"],
-    dupEmail:true, contactRule:true,
-    cols:{Trading_Name:"company",Type:{t:"text-default",def:"Contractor"},ABN:"abn",Registered_For_GST:"gst",
-      Email:"email",Phone:"phone",Website:"url",Street_Address:"proper",Suburb_Town:"proper",Postcode:"postcode",State:"state",
-      Contact1_First_Name:"proper",Contact1_Last_Name:"proper",Contact1_Email:"email",Contact1_Mobile:"phone",Contact1_Job_Title:"proper",
-      Contact2_First_Name:"proper",Contact2_Last_Name:"proper",Contact2_Email:"email",Contact2_Mobile:"phone",Contact2_Job_Title:"proper"}
+    dupEmail:true, contactRule:true, contactFallback:true,
+    cols:{Trading_Name:"keepcase",Type:{t:"type-contact",def:"Contractor"},ABN:"abn",Registered_For_GST:"gst",
+      Email:"email",Phone:"phone",Website:"url",Street_Address:"address",Suburb_Town:"title",Postcode:"postcode",State:"state",
+      Contact1_First_Name:"keepcase",Contact1_Last_Name:"keepcase",Contact1_Email:"email",Contact1_Mobile:"phone",Contact1_Job_Title:"title",
+      Contact2_First_Name:"keepcase",Contact2_Last_Name:"keepcase",Contact2_Email:"email",Contact2_Mobile:"phone",Contact2_Job_Title:"title"}
   },
   "suppliers": {
-    name:"Suppliers",
+    name:"Suppliers Contacts",
     headers:["Trading_Name","Type","ABN","Registered_For_GST","Email","Phone","Website","Street_Address","Suburb_Town","Postcode","State","Contact1_First_Name","Contact1_Last_Name","Contact1_Email","Contact1_Mobile","Contact1_Job_Title","Contact2_First_Name","Contact2_Last_Name","Contact2_Email","Contact2_Mobile","Contact2_Job_Title"],
     required:["Trading_Name"],
-    dupEmail:true, contactRule:true, adminFallback:true,
-    cols:{Trading_Name:"company",Type:{t:"text-default",def:"Supplier"},ABN:"abn",Registered_For_GST:"gst",
-      Email:"email",Phone:"phone",Website:"url",Street_Address:"proper",Suburb_Town:"proper",Postcode:"postcode",State:"state",
-      Contact1_First_Name:"proper",Contact1_Last_Name:"proper",Contact1_Email:"email",Contact1_Mobile:"phone",Contact1_Job_Title:"proper",
-      Contact2_First_Name:"proper",Contact2_Last_Name:"proper",Contact2_Email:"email",Contact2_Mobile:"phone",Contact2_Job_Title:"proper"}
+    dupEmail:true, contactRule:true, contactFallback:true,
+    cols:{Trading_Name:"keepcase",Type:{t:"type-contact",def:"Supplier"},ABN:"abn",Registered_For_GST:"gst",
+      Email:"email",Phone:"phone",Website:"url",Street_Address:"address",Suburb_Town:"title",Postcode:"postcode",State:"state",
+      Contact1_First_Name:"keepcase",Contact1_Last_Name:"keepcase",Contact1_Email:"email",Contact1_Mobile:"phone",Contact1_Job_Title:"title",
+      Contact2_First_Name:"keepcase",Contact2_Last_Name:"keepcase",Contact2_Email:"email",Contact2_Mobile:"phone",Contact2_Job_Title:"title"}
   },
   "catalogue-items": {
     name:"Catalogue Items",
@@ -399,6 +399,71 @@ function properCaseKeepCompany(s){
   }).join("");
 }
 
+const ROLE_LOCALS=["admin","accounts","account","info","sales","office","enquiries","enquiry","support","bookings","booking","reception","finance","payroll","orders","order","noreply","noreply","donotreply","contact","hello","mail","email","service","team","help","careers","hr","marketing","purchasing","estimating","estimates","tenders","quotes","quote"];
+/* Australian postcode ranges per state (first-digit / band based) */
+function postcodeMatchesState(pc, state){
+  const n=parseInt(String(pc).replace(/\D/g,""),10);
+  if(isNaN(n)) return true; /* can't check */
+  const S=String(state).toUpperCase().trim();
+  const ranges={
+    NSW:[[1000,1999],[2000,2599],[2619,2899],[2921,2999]],
+    ACT:[[200,299],[2600,2618],[2900,2920]],
+    VIC:[[3000,3999],[8000,8999]],
+    QLD:[[4000,4999],[9000,9999]],
+    SA:[[5000,5799],[5800,5999]],
+    WA:[[6000,6797],[6800,6999]],
+    TAS:[[7000,7799],[7800,7999]],
+    NT:[[800,899],[900,999]]
+  };
+  const rs=ranges[S];
+  if(!rs) return true; /* unknown state - don't second-guess */
+  return rs.some(([a,b])=>n>=a&&n<=b);
+}
+/* does a business name look like a person's name? (2-3 capitalised words, no company tokens) */
+function looksLikePerson(name){
+  const t=String(name).trim();
+  if(!t) return false;
+  if(/\b(pty|ltd|llc|inc|co|group|holdings|enterprises|industries|constructions?|builders?|plumbing|electrical|roofing|joinery|cabinets?|concreting|excavations?|services?|supplies|trading|contractors?|bros|&|and sons?|the |australia|group|company|solutions|systems|projects|developments?|homes?|building|constructions?|hire|rentals?|glass|steel|timber|concrete|paint|tiles?|carpet|landscaping|electrical|mechanical|hydraulic)\b/i.test(t)) return false;
+  const words=t.split(/\s+/).filter(Boolean);
+  if(words.length<2||words.length>3) return false;
+  /* each word looks like a name part: starts capital, rest letters (allow O'Brien, Mc, hyphen) */
+  return words.every(w=>/^[A-Z][a-zA-Z''\-]+$/.test(w));
+}
+function extractNameFromEmail(email, businessName){
+  if(!email) return null;
+  const m=String(email).toLowerCase().match(/^([^@]+)@/);
+  if(!m) return null;
+  let local=m[1].replace(/[0-9]+$/,"").trim();
+  if(!local) return null;
+  if(ROLE_LOCALS.includes(local.replace(/[._-]/g,""))) return null;
+  const cap=w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase();
+  if(/[._-]/.test(local)){
+    const parts=local.split(/[._-]+/).filter(Boolean);
+    if(parts.length===2 && parts[0].length>=2 && parts[1].length>=2 && /^[a-z]+$/.test(parts[0]) && /^[a-z]+$/.test(parts[1]))
+      return {first:cap(parts[0]), last:cap(parts[1])};
+    if(parts.length===1 && /^[a-z]+$/.test(parts[0]) && parts[0].length>=2)
+      return {first:cap(parts[0]), last:""};
+    return null;
+  }
+  if(/^[a-z]+$/.test(local) && local.length>=2 && businessName){
+    const bizFirst=String(businessName).toLowerCase().replace(/[^a-z ]/g,"").trim().split(/\s+/)[0]||"";
+    if(bizFirst && local===bizFirst) return {first:cap(local), last:""};
+  }
+  return null;
+}
+
+function titleCaseKeepAcronyms(s){
+  if(!s) return s;
+  return s.split(/(\s+|-)/).map(w=>{
+    if(/^(\s+|-)$/.test(w)||w==="") return w;
+    const bare=w.replace(/[^A-Za-z0-9&]/g,"");
+    if(!bare) return w;
+    if(ACRONYMS.includes(bare.toUpperCase())) return w.replace(bare,bare.toUpperCase());
+    if(/[A-Za-z]/.test(bare) && /[0-9]/.test(bare)) return w; /* mixed token like 1a */
+    return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase();
+  }).join("");
+}
+
 function sentenceCase(s){
   if(!s) return s;
   /* Lower-case any ALL-CAPS word that isn't a genuine acronym or a product/model code,
@@ -488,21 +553,25 @@ function fmtDate(d){
 function fmtPhone(raw){
   let s=String(raw).trim();
   if(!s) return {v:""};
-  /* kill decimal artifacts like 412345678.0 */
-  s=s.replace(/\.0+$/,"");
+  s=s.replace(/\.0+$/,"");                 /* kill decimal artifacts like 412345678.0 */
   let digits=s.replace(/[^\d+]/g,"");
-  if(digits.startsWith("+61")) digits="0"+digits.slice(3);
-  else if(digits.startsWith("61")&&digits.length>=11) digits="0"+digits.slice(2);
+  /* strip country code 61 (with or without +), and a following trunk 0 */
+  if(digits.startsWith("+61")) digits=digits.slice(3);
+  else if(digits.startsWith("61")&&digits.length>=10) digits=digits.slice(2);
   digits=digits.replace(/\D/g,"");
-  /* mobile lost its leading zero (Excel strips it): 4XXXXXXXX = 9 digits */
-  if(digits.length===9&&digits[0]==="4") digits="0"+digits;
-  if(digits.length===9&&/^[2378]/.test(digits)) digits="0"+digits;
+  if(digits.startsWith("0")&&digits.length>10) digits=digits.replace(/^0+/,"0"); /* collapse 61 0 -> 0 leftover */
+  /* restore leading zero on mobiles/landlines that lost it */
+  if(digits.length===9&&digits[0]==="4") digits="0"+digits;         /* 4XXXXXXXX -> 04XXXXXXXX */
+  else if(digits.length===9&&/^[2378]/.test(digits)) digits="0"+digits; /* area+8 without 0 */
+  /* formats per spec */
   if(/^04\d{8}$/.test(digits)) return {v:digits.replace(/(\d{4})(\d{3})(\d{3})/,"$1 $2 $3"),note:"standardised mobile"};
   if(/^1300\d{6}$/.test(digits)) return {v:digits.replace(/(1300)(\d{3})(\d{3})/,"$1 $2 $3"),note:"standardised 1300"};
   if(/^1800\d{6}$/.test(digits)) return {v:digits.replace(/(1800)(\d{3})(\d{3})/,"$1 $2 $3"),note:"standardised 1800"};
   if(/^13\d{4}$/.test(digits)) return {v:digits.replace(/(13)(\d{2})(\d{2})/,"$1 $2 $3"),note:"standardised 13"};
-  if(/^0[2378]\d{8}$/.test(digits)) return {v:"("+digits.slice(0,2)+") "+digits.slice(2,6)+" "+digits.slice(6),note:"standardised landline"};
-  return {v:s,warn:"does not match an Australian phone format - please review"};
+  if(/^0[2378]\d{8}$/.test(digits)) return {v:digits.slice(0,2)+" "+digits.slice(2,6)+" "+digits.slice(6),note:"standardised landline"};
+  /* bare 8-digit landline with no area code - can't reformat reliably, blank + flag */
+  if(/^\d{8}$/.test(digits)) return {v:"",warn:'phone "'+s+'" has no area code - blanked, enter manually'};
+  return {v:s,warn:'phone "'+s+'" does not match an Australian format - please review'};
 }
 
 function fmtNumber(raw,dp){
@@ -539,6 +608,53 @@ function applyRule(rule,val,ctx){
       if(!v) break;
       const cc=properCaseKeepCompany(v);
       if(cc!==v){ issues.push({level:"fixed",msg:"company/trade name casing tidied"}); v=cc; }
+      break;
+    }
+    case "keepcase": {
+      /* business names and person names: clean spacing only, never re-case
+         (preserves McKillop, D'Errico, A.P Richardson, PTY Ltd, t/a, etc.) */
+      if(!v) break;
+      const cleaned=v.replace(/\s+/g," ").trim();
+      if(cleaned!==v){ issues.push({level:"fixed",msg:"trimmed extra spaces"}); v=cleaned; }
+      break;
+    }
+    case "title": {
+      /* Suburb / Job Title: Title Case ordinary words, keep acronyms & mixed tokens */
+      if(!v) break;
+      const tc=titleCaseKeepAcronyms(v);
+      if(tc!==v){ issues.push({level:"fixed",msg:"cased to Title Case"}); v=tc; }
+      break;
+    }
+    case "address": {
+      /* Street address: trim/collapse spaces, blank literal "Unknown",
+         Title-case only ALL-CAPS ordinary words (PO BOX -> PO Box), keep unit tokens/acronyms */
+      if(!v) break;
+      if(/^unknown$/i.test(v.trim())){ issues.push({level:"review",msg:'address was literal "Unknown" - blanked, enter manually if known'}); v=""; break; }
+      let out=v.replace(/\s+/g," ").trim();
+      out=out.split(/(\s+)/).map(w=>{
+        if(/^\s+$/.test(w)||w==="") return w;
+        const bare=w.replace(/[^A-Za-z0-9&'#/\-]/g,"");
+        if(!bare) return w;
+        const hasLetters=/[A-Za-z]/.test(bare);
+        const isAllCaps=hasLetters && bare===bare.toUpperCase();
+        if(!isAllCaps) return w;                         /* keep mixed-case as-is */
+        if(ACRONYMS.includes(bare.toUpperCase())) return w; /* keep PO, NSW etc. */
+        if(/[0-9]/.test(bare)) return w;                 /* keep unit tokens like 1a, GF#6, 5&6/100 */
+        if(bare.length<=1) return w;
+        return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase();
+      }).join("");
+      if(out!==v) issues.push({level:"fixed",msg:"address spacing/casing tidied"});
+      v=out;
+      break;
+    }
+    case "type-contact": {
+      /* Supplier/Contractor Type: trim spaces, default when blank, flag non-standard values */
+      if(!v){ v=r.def; issues.push({level:"fixed",msg:'Type defaulted to "'+r.def+'"'}); break; }
+      v=v.replace(/\s+/g," ").trim();
+      const standard=["Supplier","Contractor","Subcontractor"];
+      const hit=standard.find(s=>s.toLowerCase()===v.toLowerCase());
+      if(hit){ if(hit!==v) issues.push({level:"fixed",msg:'Type standardised to "'+hit+'"'}); v=hit; }
+      else issues.push({level:"review",msg:'Type "'+v+'" is non-standard - only import if it exists in JACK (Settings > Data Setup > Supplier/Contractor Types)'});
       break;
     }
     case "sentence": {
@@ -637,8 +753,8 @@ function applyRule(rule,val,ctx){
       if(!v) break;
       const d=String(v).replace(/\.0+$/,"").replace(/\D/g,"");
       if(d.length===11){ if(d!==v) issues.push({level:"fixed",msg:"ABN cleaned to 11 digits, spaces removed"}); v=d; }
-      else if(d.length>11){ issues.push({level:"error",msg:"ABN has more than 11 digits - cheatsheet says delete it"}); v=d; }
-      else { issues.push({level:"error",msg:"ABN must be exactly 11 digits (has "+d.length+")"}); v=d; }
+      else if(d.length>11){ issues.push({level:"fixed",msg:"ABN had "+d.length+" digits (more than 11) - deleted per cheatsheet"}); v=""; }
+      else { issues.push({level:"error",msg:"ABN must be exactly 11 digits (has "+d.length+") - check with the customer"}); v=d; }
       break;
     }
     case "gst": {
@@ -849,6 +965,69 @@ function applyRule(rule,val,ctx){
 </script>
 <script>
 /* ============ PARSING + PIPELINE ============ */
+let XERO_NOTE=null;
+/* Detect a Xero contact export and convert it to the JACK Suppliers/Contractors layout.
+   Returns {rows:[header,...dataRows], tplKey, note} or null if not a Xero export. */
+function maybeTransformXero(parsed, chosenTpl){
+  if(!parsed||parsed.length<2) return null;
+  const hdr=parsed[0].map(h=>String(h==null?"":h).trim());
+  const norm=hdr.map(h=>h.toLowerCase().replace(/[^a-z0-9]/g,""));
+  const has=n=>norm.indexOf(n);
+  /* signature columns of a Xero contact export */
+  const ciName=has("contactname"), ciEmail=has("emailaddress"), ciTax=has("taxnumber");
+  if(ciName<0||ciEmail<0) return null; /* not Xero */
+  const col=n=>{const i=has(n);return i;};
+  /* the leading blank column [0] holds the S/C flag in this export */
+  const flagIdx=0; /* first column */
+  const idx={
+    name:ciName, email:ciEmail, first:col("firstname"), last:col("lastname"),
+    tax:col("taxnumber"), phone:col("phonenumber"), mobile:col("mobilenumber"),
+    website:col("website"),
+    sa1:col("saaddressline1"), saCity:col("sacity"), saRegion:col("saregion"), saPost:col("sapostalcode"),
+    po1:col("poaddressline1"), poCity:col("pocity"), poRegion:col("poregion"), poPost:col("popostalcode"),
+    p1f:col("person1firstname"), p1l:col("person1lastname"), p1e:col("person1email"),
+    p2f:col("person2firstname"), p2l:col("person2lastname"), p2e:col("person2email")
+  };
+  /* which type are we building? map the dropdown choice to the S/C flag */
+  let want=null, tplKey=chosenTpl;
+  if(chosenTpl==="suppliers") want="S";
+  else if(chosenTpl==="contractors") want="C";
+  else { want=null; tplKey="suppliers"; } /* auto -> default to suppliers, keep all */
+
+  const JACK=["Trading_Name","Type","ABN","Registered_For_GST","Email","Phone","Website","Street_Address","Suburb_Town","Postcode","State","Contact1_First_Name","Contact1_Last_Name","Contact1_Email","Contact1_Mobile","Contact1_Job_Title","Contact2_First_Name","Contact2_Last_Name","Contact2_Email","Contact2_Mobile","Contact2_Job_Title"];
+  const get=(row,i)=> (i>=0 && row[i]!=null) ? String(row[i]).trim() : "";
+  const out=[JACK]; let kept=0, skipped=0;
+  for(let r=1;r<parsed.length;r++){
+    const row=parsed[r];
+    if(!row||row.every(c=>String(c==null?"":c).trim()==="")) continue;
+    const flag=String(row[flagIdx]==null?"":row[flagIdx]).trim().toUpperCase();
+    if(want && flag!==want){ skipped++; continue; }
+    /* address: prefer street (SA), fall back to postal (PO) */
+    const useSA = get(row,idx.sa1)!=="";
+    const addr = useSA ? get(row,idx.sa1) : get(row,idx.po1);
+    const city = useSA ? get(row,idx.saCity) : get(row,idx.poCity);
+    const region = useSA ? get(row,idx.saRegion) : get(row,idx.poRegion);
+    const post = useSA ? get(row,idx.saPost) : get(row,idx.poPost);
+    /* contact1: FirstName/LastName, else Person1 */
+    let c1f=get(row,idx.first), c1l=get(row,idx.last), c1e=get(row,idx.email);
+    if(!c1f && !c1l){ c1f=get(row,idx.p1f); c1l=get(row,idx.p1l); if(!c1e) c1e=get(row,idx.p1e); }
+    /* contact2: Person2 (or Person1 if contact1 came from FirstName) */
+    let c2f=get(row,idx.p2f), c2l=get(row,idx.p2l), c2e=get(row,idx.p2e);
+    if((get(row,idx.first)||get(row,idx.last)) && !c2f && !c2l){ c2f=get(row,idx.p1f); c2l=get(row,idx.p1l); if(!c2e) c2e=get(row,idx.p1e); }
+    const rec={
+      Trading_Name:get(row,idx.name), Type:"", ABN:get(row,idx.tax), Registered_For_GST:"",
+      Email:get(row,idx.email), Phone:get(row,idx.phone), Website:get(row,idx.website),
+      Street_Address:addr, Suburb_Town:city, Postcode:post, State:region,
+      Contact1_First_Name:c1f, Contact1_Last_Name:c1l, Contact1_Email:c1e, Contact1_Mobile:get(row,idx.mobile), Contact1_Job_Title:"",
+      Contact2_First_Name:c2f, Contact2_Last_Name:c2l, Contact2_Email:c2e, Contact2_Mobile:"", Contact2_Job_Title:""
+    };
+    out.push(JACK.map(k=>rec[k]||""));
+    kept++;
+  }
+  const label = want==="S"?"Suppliers":(want==="C"?"Contractors":"all contacts");
+  return {rows:out, tplKey, note:"Xero export detected: mapped "+kept+" "+label+" row(s) to the JACK layout"+(skipped?" ("+skipped+" other-type rows filtered out)":"")+". Street address used where present, postal address as fallback."};
+}
+
 function parseInput(text){
   const lines=text.replace(/\r\n?/g,"\n").split("\n").filter((l,i,arr)=> l.trim()!=="" || i<arr.length-1);
   while(lines.length && lines[lines.length-1].trim()==="") lines.pop();
@@ -982,6 +1161,16 @@ function runCheck(){
 
   let tplKey=document.getElementById("tpl").value;
   let headers=parsed[0].map(h=>String(h).trim());
+
+  /* ===== Xero contact export? transform it to the JACK contact layout ===== */
+  const xero=maybeTransformXero(parsed, tplKey);
+  if(xero){
+    parsed.length=0; xero.rows.forEach(r=>parsed.push(r));
+    headers=parsed[0].map(h=>String(h).trim());
+    if(tplKey==="auto") tplKey=xero.tplKey;
+    XERO_NOTE=xero.note;
+  } else XERO_NOTE=null;
+
   if(tplKey==="auto"){
     tplKey=detectTemplate(headers);
     if(!tplKey){ checksEl.innerHTML='<div class="check error"><span class="stamp">Error</span><div class="msg">Could not match your headers to a JACK template. Pick the template manually from the dropdown, or check the first row contains the template headers.</div></div>'; return; }
@@ -993,6 +1182,7 @@ function runCheck(){
   headers=[...tpl.headers]; /* output always follows the exact JACK template layout */
 
   const issues=[]; const cellFlags={}; const origin={};
+  if(XERO_NOTE) issues.push({row:-1,col:-1,level:"fixed",msg:XERO_NOTE});
   plan.notes.forEach(n=>issues.push({row:-1,col:-1,level:n.level,msg:n.msg}));
   const rows=[];
   const rowTotals=[]; /* raw source line total per kept row, for markup base */
@@ -1052,14 +1242,16 @@ function runCheck(){
     if(rawRow.every(c=>c.trim()==="")){ blankRows.push(ri+2); return; }
     /* rebuild the row in exact template column order; unmatched template columns become blank */
     const row=plan.srcIdx.map(si=> si>=0?rawRow[si]:"");
-    /* delete separator rows (Item or Cost_Category is just "-------" style dashes) */
-    if((itemColIdx>=0 && isSeparator(row[itemColIdx])) || (ccColIdx>=0 && isSeparator(row[ccColIdx]))){ separatorRows.push(ri+2); return; }
+    /* separator rows (Item or Cost_Category is just "-------" style dashes) - FLAG, don't delete */
+    let separatorSuspect=false;
+    if((itemColIdx>=0 && isSeparator(row[itemColIdx])) || (ccColIdx>=0 && isSeparator(row[ccColIdx]))) separatorSuspect=true;
     /* flag heading rows (Item is a section label, not a real line item) - do NOT auto-delete, warn instead */
     let headingSuspect=false;
     const rawUomVal = rawUomIdx>=0 ? rawRow[rawUomIdx] : "";
     if(itemColIdx>=0 && isHeading(row[itemColIdx], ccColIdx>=0?row[ccColIdx]:undefined, row, rawUomVal)) headingSuspect=true;
-    /* cheatsheet: estimate rows with a blank Item must be deleted */
-    if(itemColIdx>=0 && row[itemColIdx].trim()===""){ deletedItemRows.push(ri+2); return; }
+    /* rows with a blank Item - FLAG for review, don't delete (may be a category subtotal you want) */
+    let blankItemSuspect=false;
+    if(itemColIdx>=0 && row[itemColIdx].trim()==="") blankItemSuspect=true;
     const rowIdx=rows.length;
     const outRow=[];
     /* allowance detection first for estimates */
@@ -1119,18 +1311,28 @@ function runCheck(){
       }
       /* required blank check */
       if(tpl.required.includes(h)&&v.trim()===""){
-        issues.push({row:rowIdx,col:ci,level:"error",msg:h+" (row "+(rowIdx+1)+"): required field is blank"+(tpl.estimate?" - cheatsheet says delete rows with blanks":"")});
-        worst="error";
+        if(tpl.estimate && h==="Item"){
+          /* blank Item on an estimate is already flagged in the review bar - note it softly, not a hard error */
+          issues.push({row:rowIdx,col:ci,level:"review",msg:h+" (row "+(rowIdx+1)+"): blank - review whether this row should be kept or removed"});
+          worst=worst==="error"?"error":"review";
+        } else {
+          issues.push({row:rowIdx,col:ci,level:"error",msg:h+" (row "+(rowIdx+1)+"): required field is blank"});
+          worst="error";
+        }
       }
       if(worst) cellFlags[rowIdx+"_"+ci]=worst;
       if(v!==String(row[ci]).trim()&&String(row[ci]).trim()!=="") origin[rowIdx+"_"+ci]=String(row[ci]).trim();
       outRow.push(v);
     });
-    /* duplicate email check */
+    /* duplicate email check - only across DIFFERENT records; same email within one
+       record's own fields (Email + Contact1_Email) is fine (spec 4.2) */
     if(tpl.dupEmail){
+      const rowEmails=new Set();
       headers.forEach((h,ci)=>{
         if(/email/i.test(h)&&outRow[ci]){
           const e=outRow[ci].toLowerCase();
+          if(rowEmails.has(e)) return; /* same email again in this same row - ignore */
+          rowEmails.add(e);
           if(emailsSeen[e]!==undefined){
             issues.push({row:rowIdx,col:ci,level:"error",msg:h+" (row "+(rowIdx+1)+'): duplicate email "'+e+'" (also on row '+(emailsSeen[e]+1)+") - JACK rejects duplicate emails even across types"});
             cellFlags[rowIdx+"_"+ci]="error";
@@ -1138,32 +1340,65 @@ function runCheck(){
         }
       });
     }
-    /* Contact1_First_Name required when email/mobile present */
-    if(tpl.contactRule){
-      const fi=headers.indexOf("Contact1_First_Name"), ei=headers.indexOf("Contact1_Email"), mi=headers.indexOf("Contact1_Mobile");
-      if(fi>=0&&((ei>=0&&outRow[ei])||(mi>=0&&outRow[mi]))&&!outRow[fi]){
-        if(tpl.adminFallback){
-          outRow[fi]="Admin";
-          issues.push({row:rowIdx,col:fi,level:"fixed",msg:'Contact1_First_Name (row '+(rowIdx+1)+'): blank but email/mobile present - filled with "Admin" per cheatsheet'});
+    /* Contact1/Contact2 First_Name required when that contact has an email or mobile.
+       Fallback order: real name (already there) -> name extracted from email (flag green)
+       -> company / Trading_Name. */
+    if(tpl.contactFallback){
+      const tnI=headers.indexOf("Trading_Name");
+      [["Contact1_First_Name","Contact1_Last_Name","Contact1_Email","Contact1_Mobile"],
+       ["Contact2_First_Name","Contact2_Last_Name","Contact2_Email","Contact2_Mobile"]].forEach(([fn,ln,em,mo])=>{
+        const fi=headers.indexOf(fn), li=headers.indexOf(ln), ei=headers.indexOf(em), mi=headers.indexOf(mo);
+        if(fi<0) return;
+        const hasContact=(ei>=0&&outRow[ei])||(mi>=0&&outRow[mi]);
+        if(!hasContact || outRow[fi]) return; /* no contact detail, or name already present */
+        /* try to extract a person name from the email local-part */
+        const email = ei>=0 ? outRow[ei] : "";
+        const extracted = extractNameFromEmail(email, tnI>=0?outRow[tnI]:"");
+        if(extracted){
+          outRow[fi]=extracted.first;
+          cellFlags[rowIdx+"_"+fi]="review"; /* green-ish: inferred, verify */
+          if(extracted.last && li>=0 && !outRow[li]){ outRow[li]=extracted.last; cellFlags[rowIdx+"_"+li]="review"; }
+          issues.push({row:rowIdx,col:fi,level:"review",msg:fn+" (row "+(rowIdx+1)+'): inferred "'+extracted.first+(extracted.last?" "+extracted.last:"")+'" from the email - please verify'});
+        } else if(tnI>=0 && outRow[tnI]){
+          outRow[fi]=outRow[tnI];
           cellFlags[rowIdx+"_"+fi]="fixed";
+          issues.push({row:rowIdx,col:fi,level:"fixed",msg:fn+" (row "+(rowIdx+1)+"): was blank with a contact email/mobile - filled with the business name (JACK requires a first name)"});
         } else {
-          issues.push({row:rowIdx,col:fi,level:"error",msg:"Contact1_First_Name (row "+(rowIdx+1)+"): required when Contact1_Email or Contact1_Mobile is present - import will fail"});
+          issues.push({row:rowIdx,col:fi,level:"error",msg:fn+" (row "+(rowIdx+1)+"): required when the contact has an email or mobile - import will fail"});
           cellFlags[rowIdx+"_"+fi]="error";
         }
+      });
+    }
+    /* postcode vs state cross-check (spec 12) */
+    if(tpl.contactFallback){
+      const pi=headers.indexOf("Postcode"), si=headers.indexOf("State");
+      if(pi>=0&&si>=0&&outRow[pi]&&outRow[si]&&/^\d{4}$/.test(outRow[pi])){
+        if(!postcodeMatchesState(outRow[pi],outRow[si])){
+          issues.push({row:rowIdx,col:pi,level:"review",msg:"Postcode "+outRow[pi]+" (row "+(rowIdx+1)+") doesn't match state "+outRow[si]+" - please check"});
+          cellFlags[rowIdx+"_"+pi]="review";
+        }
+      }
+      /* business name looks like a person (spec 13 blue flag) */
+      const tnI=headers.indexOf("Trading_Name");
+      if(tnI>=0&&outRow[tnI]&&looksLikePerson(outRow[tnI])){
+        issues.push({row:rowIdx,col:tnI,level:"review",msg:'Trading_Name "'+outRow[tnI]+'" (row '+(rowIdx+1)+") looks like a person's name - kept as-is, but review whether it should be a contact"});
       }
     }
-    if(headingSuspect){
+    if(headingSuspect || blankItemSuspect || separatorSuspect){
       headingRows.push(rowIdx);
-      if(itemColIdx>=0){ cellFlags[rowIdx+"_"+itemColIdx]="review"; }
-      issues.push({row:rowIdx,col:itemColIdx,level:"review",msg:'Item (row '+(rowIdx+1)+'): looks like a section heading, not a real line - review the heading bar above the table'});
+      const flagCol = itemColIdx>=0 ? itemColIdx : 0;
+      cellFlags[rowIdx+"_"+flagCol]="review";
+      let why;
+      if(headingSuspect) why="looks like a section heading, not a real line";
+      else if(separatorSuspect) why="looks like a separator row (just dashes)";
+      else why="has a blank Item (may be a category subtotal)";
+      issues.push({row:rowIdx,col:flagCol,level:"review",msg:'Row '+(rowIdx+1)+': '+why+' - review in the bar above the table before importing'});
     }
     rows.push(outRow);
     rowTotals.push(rawTotalIdx>=0 ? parseFloat(String(rawRow[rawTotalIdx]).replace(/[$,\s]/g,"")) : NaN);
   });
 
   if(blankRows.length) issues.push({row:-1,col:-1,level:"fixed",msg:"Removed "+blankRows.length+" completely blank row(s)"});
-  if(deletedItemRows.length) issues.push({row:-1,col:-1,level:"fixed",msg:"Deleted "+deletedItemRows.length+" row(s) with a blank Item per cheatsheet (source rows "+deletedItemRows.join(", ")+")"});
-  if(separatorRows.length) issues.push({row:-1,col:-1,level:"fixed",msg:"Deleted "+separatorRows.length+" separator row(s) where Item or Cost_Category was just dashes (source rows "+separatorRows.join(", ")+")"});
 
   /* ===== Qty verification: Qty should equal Total / Price_Each (fixes rounded quantities) ===== */
   if(tpl.estimate){
@@ -1598,21 +1833,20 @@ document.getElementById("file").addEventListener("change",e=>{
 });
 document.getElementById("sheet").addEventListener("change",e=>{ loadSheet(e.target.value); toast('Loaded "'+e.target.value+'"'); });
 
-/* populate template dropdown - only Costings/Estimate is live, the rest are coming soon */
+/* populate template dropdown - estimate, contractors and suppliers are live; the rest coming soon */
 (function(){
   const sel=document.getElementById("tpl");
-  const LIVE="costings-estimate";
+  const LIVE=["costings-estimate","contractors","suppliers"];
   for(const key in TEMPLATES){
     const o=document.createElement("option");
-    if(key===LIVE){
+    if(LIVE.includes(key)){
       o.value=key; o.textContent=TEMPLATES[key].name;
     } else {
       o.value=key; o.textContent=TEMPLATES[key].name+" (coming soon)"; o.disabled=true;
     }
     sel.appendChild(o);
   }
-  /* default the selection to the live estimate template */
-  sel.value=LIVE;
+  sel.value="costings-estimate";
 })();
 /* keyboard: Ctrl+Enter runs check */
 document.getElementById("src").addEventListener("keydown",e=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter") runCheck(); });
