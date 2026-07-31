@@ -134,6 +134,8 @@ td .was{display:block;color:var(--steel);font-size:10.5px;text-decoration:line-t
 
 .phasebar{display:none;align-items:center;gap:12px;background:var(--warn-bg);border:1px solid #EAD9B0;border-radius:6px;padding:10px 12px;margin-bottom:10px}
 .phasebar.show{display:flex}
+.phasebar.mkbar-info{background:#EAF6EC;border-color:#BFE3C6}
+.phasebar.mkbar-info b{color:#1F7A33}
 .phasebar b{color:var(--warn)}
 
 .footnote{color:var(--steel);font-size:12px;margin-top:10px}
@@ -150,7 +152,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 54)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 56)</span></span>
   </div>
 </header>
 
@@ -201,6 +203,10 @@ Slab pour		10/01/2026	1"></textarea>
   <section class="card" aria-label="Results">
     <h2><span class="step">3</span> Formatted output</h2>
     <div class="summary" id="summary"></div>
+    <div class="phasebar mkbar-info" id="mkbar">
+      <span id="mkmsg"></span>
+      <button class="btn btn-small btn-fix" id="clearmarkup">Clear Markup column (use global)</button>
+    </div>
     <div class="phasebar" id="phasebar">
       <span>⚠ <b id="phasecount"></b> schedule rows have <b>no Phase</b>.</span>
       <button class="btn btn-small btn-fix" id="fillphase">Fill blanks with "Unspecified"</button>
@@ -213,10 +219,6 @@ Slab pour		10/01/2026	1"></textarea>
     <div class="phasebar" id="headingbar">
       <span>⚠ <b id="headingcount"></b> row(s) flagged for review: <b>section headings or separators</b>. Nothing is deleted automatically - review, then remove if needed. (Items with a name are always kept, even at $0.)</span>
       <button class="btn btn-small" id="delheadings">Delete all flagged</button>
-    </div>
-    <div class="phasebar" id="mkbar">
-      <span id="mkmsg"></span>
-      <button class="btn btn-small btn-fix" id="clearmarkup">Clear Markup column (use global)</button>
     </div>
     <div class="phasebar" id="uombar">
       <span>⚠ <b id="uomcount"></b> rows have <b>numbers in UOM</b> - these look like unit costs in the wrong column.</span>
