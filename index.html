@@ -51,8 +51,9 @@ h1{font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:.4px
 .h-sub{color:#5A1A10;font-size:13px}
 header::after{content:"";display:block;position:absolute;left:0;right:0;bottom:0;height:4px;background:var(--toolbox)}
 
-main{display:grid;grid-template-columns:minmax(320px,430px) 1fr;gap:18px;padding:18px 22px;max-width:1700px;margin:0 auto}
-@media(max-width:980px){main{grid-template-columns:1fr}}
+main{display:block;padding:18px 22px;max-width:1700px;margin:0 auto}
+.toprow{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
+@media(max-width:980px){.toprow{grid-template-columns:1fr}}
 
 .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
 .card h2{font-family:var(--display);font-size:16px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
@@ -75,6 +76,17 @@ select:hover,textarea:hover{border-color:var(--steel)}
 
 /* inspection card */
 .inspect{margin-top:14px}
+#checks{max-height:520px;overflow-y:auto;padding-right:6px}
+#checks::-webkit-scrollbar{width:9px}
+#checks::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
+#checks::-webkit-scrollbar-thumb:hover{background:#c8c8c0}
+.checkcount{position:sticky;top:0;background:#fff;display:flex;gap:8px;flex-wrap:wrap;padding:2px 0 10px;margin-bottom:4px;border-bottom:1px solid var(--line);z-index:2}
+.cc{font-size:12px;font-weight:700;padding:3px 9px;border-radius:20px}
+.cc-err{background:#FDE7E4;color:#B32410}
+.cc-rev{background:#FFF2DC;color:#8A5A00}
+.cc-fix{background:#FFF6E9;color:#9A6B12}
+.rowfilter{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--steel);cursor:pointer;margin-left:12px;user-select:none}
+.rowfilter input{cursor:pointer}
 .check{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-left:4px solid var(--line);background:#FBFBF9;border-radius:0 6px 6px 0;margin-bottom:6px;font-size:13px}
 .check .stamp{font-family:var(--display);font-weight:700;font-size:11px;letter-spacing:.8px;text-transform:uppercase;padding:2px 7px;border-radius:4px;white-space:nowrap}
 .check.pass{border-left-color:var(--ok)} .check.pass .stamp{background:var(--ok-bg);color:var(--ok)}
@@ -134,42 +146,54 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 44)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 51)</span></span>
   </div>
 </header>
 
 <main>
-  <!-- LEFT: input -->
-  <section class="card" aria-label="Input">
-    <h2><span class="step">1</span> Paste your data</h2>
-    <label for="tpl">Template</label>
-    <select id="tpl">
-      <option value="auto">Auto-detect from headers</option>
-    </select>
-    <div style="font-size:12px;color:var(--steel);margin:6px 0 2px">Built for <b>Buildxact</b> exports, plus <b>Xero</b> contact exports (pick Suppliers or Contractors to split the S/C column). More coming soon.</div>
-    <label for="src">Data (copy straight from Excel, headers included)</label>
-    <textarea id="src" spellcheck="false" placeholder="Paste rows here, e.g.
+  <div class="toprow">
+    <!-- input -->
+    <section class="card" aria-label="Input">
+      <h2><span class="step">1</span> Paste your data</h2>
+      <label for="tpl">Template</label>
+      <select id="tpl">
+        <option value="auto">Auto-detect from headers</option>
+      </select>
+      <div style="font-size:12px;color:var(--steel);margin:6px 0 2px">Built for <b>Buildxact</b> exports, plus <b>Xero</b> contact exports (pick Suppliers or Contractors to split the S/C column). More coming soon.</div>
+      <div id="caserow" style="display:none;margin:8px 0 2px">
+        <label for="catcase">Cost Category casing</label>
+        <select id="catcase">
+          <option value="proper">Proper Case (Demolition Works)</option>
+          <option value="upper">UPPERCASE (DEMOLITION WORKS)</option>
+        </select>
+      </div>
+      <label for="src">Data (copy straight from Excel, headers included)</label>
+      <textarea id="src" spellcheck="false" placeholder="Paste rows here, e.g.
 
 Item_Name	Phase	Start_Date	Duration
 Site establishment	Preliminaries	05/01/2026	2
 Slab pour		10/01/2026	1"></textarea>
-    <div style="margin-top:8px">
-      <label for="file">Or open an Excel / CSV file</label>
-      <input type="file" id="file" accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt">
-      <div id="sheetrow" style="display:none;margin-top:6px">
-        <label for="sheet">Worksheet</label>
-        <select id="sheet"></select>
+      <div style="margin-top:8px">
+        <label for="file">Or open an Excel / CSV file</label>
+        <input type="file" id="file" accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt">
+        <div id="sheetrow" style="display:none;margin-top:6px">
+          <label for="sheet">Worksheet</label>
+          <select id="sheet"></select>
+        </div>
       </div>
-    </div>
-    <button class="btn btn-primary" id="run">Check and format</button>
+      <button class="btn btn-primary" id="run">Check and format</button>
+    </section>
 
-    <div class="inspect">
-      <h2 style="margin-top:6px"><span class="step">2</span> Inspection card</h2>
-      <div id="checks"><div class="footnote">Run a check to see results here. Fixed = corrected automatically. Review = look at it yourself. Error = must be resolved before import.</div></div>
-    </div>
-  </section>
+    <!-- inspection -->
+    <section class="card" aria-label="Inspection">
+      <div class="inspect">
+        <h2><span class="step">2</span> Inspection card</h2>
+        <div id="checks"><div class="footnote">Run a check to see results here. Fixed = corrected automatically. Review = look at it yourself. Error = must be resolved before import.</div></div>
+      </div>
+    </section>
+  </div>
 
-  <!-- RIGHT: output -->
+  <!-- output full width -->
   <section class="card" aria-label="Results">
     <h2><span class="step">3</span> Formatted output</h2>
     <div class="summary" id="summary"></div>
@@ -196,11 +220,12 @@ Slab pour		10/01/2026	1"></textarea>
     </div>
     <div class="toolbar">
       <span class="pill" id="tplpill">No template detected</span>
+      <label class="rowfilter" id="rowfilterwrap" style="display:none"><input type="checkbox" id="rowfilter"> Show only rows to review/fix</label>
       <span class="spacer"></span>
       <button class="btn btn-small" id="xlsx" disabled>Download Excel</button>
     </div>
     <div class="tbl-wrap" id="tblwrap">
-      <div class="empty"><b>Nothing checked yet</b>Paste your data on the left and hit Check and Format.<br>Cells in the result are editable. Changed cells show the old value crossed out.</div>
+      <div class="empty"><b>Nothing checked yet</b>Paste your data above and hit Check and Format.<br>Cells in the result are editable. Changed cells show the old value crossed out.</div>
     </div>
     <p class="footnote">Highlight legend: yellow = fixed automatically, amber = please review, red = blocking error. Edit any cell directly, then copy or download. Times in Start_Time and End_Time are cleared on schedules per the cheatsheet.</p>
   </section>
@@ -610,6 +635,12 @@ function applyRule(rule,val,ctx){
       if(cc!==v){ issues.push({level:"fixed",msg:"company/trade name casing tidied"}); v=cc; }
       break;
     }
+    case "upper": {
+      if(!v) break;
+      const uc=v.toUpperCase();
+      if(uc!==v){ issues.push({level:"fixed",msg:"set to UPPERCASE"}); v=uc; }
+      break;
+    }
     case "keepcase": {
       /* business names and person names: clean spacing only, never re-case
          (preserves McKillop, D'Errico, A.P Richardson, PTY Ltd, t/a, etc.) */
@@ -773,6 +804,10 @@ function applyRule(rule,val,ctx){
       }
       const orig=v;
       let low=v.toLowerCase().replace(/\s+/g," ").trim();
+      /* strip a leading "/" or "per " (a "per X" notation is the same unit as "X"):
+         "/bag" = "per bag" = "bag";  "perjob" = "per job" = "job".
+         Insert a space after "per" when it's run together (perjob -> per job -> job). */
+      low=low.replace(/^\//,"").replace(/^per(?=[a-z])/,"per ").replace(/^per\s+/,"").replace(/\s+/g," ").trim();
       /* canonical UOM map: many spellings/variants -> one standard short form */
       const UMAP={
         /* --- Quantity / Count (each unit keeps its own abbreviation) --- */
@@ -789,6 +824,7 @@ function applyRule(rule,val,ctx){
         "bunch":"bnch","bnch":"bnch",
         "stack":"stk","stk":"stk",
         "number":"no","no":"no","no.":"no","nos":"no","nr":"no",
+        "job":"job","jobs":"job","perjob":"job",
         /* --- Packaging --- */
         "bag":"bag","bags":"bag",
         "sack":"sk","sacks":"sk","sk":"sk",
@@ -819,7 +855,7 @@ function applyRule(rule,val,ctx){
         "sleeve":"slv","sleeves":"slv","slv":"slv",
         "cart":"cart","carts":"cart",
         /* --- Construction Material --- */
-        "sheet":"sht","sheets":"sht","sht":"sht",
+        "sheet":"sheet","sheets":"sheet","sht":"sheet",
         "panel":"pnl","panels":"pnl","pnl":"pnl",
         "board":"bd","boards":"bd","bd":"bd",
         "plank":"plank","planks":"plank",
@@ -885,13 +921,13 @@ function applyRule(rule,val,ctx){
         "ounce":"oz","ounces":"oz","oz":"oz",
         /* --- Time --- */
         "second":"sec","seconds":"sec","sec":"sec",
-        "minute":"min","minutes":"min","min":"min",
-        "hour":"hr","hours":"hr","hr":"hr","hrs":"hr",
+        "minute":"minute","minutes":"minute","min":"minute","mins":"minute",
+        "hour":"hour","hours":"hour","hr":"hour","hrs":"hour",
         "day":"day","days":"day",
-        "week":"wk","weeks":"wk","wk":"wk","wks":"wk",
-        "month":"mo","months":"mo","mo":"mo","mth":"mo","mths":"mo",
-        "quarter":"qtr","quarters":"qtr","qtr":"qtr",
-        "year":"yr","years":"yr","yr":"yr","yrs":"yr",
+        "week":"week","weeks":"week","wk":"week","wks":"week",
+        "month":"month","months":"month","mo":"month","mth":"month","mths":"month",
+        "quarter":"quarter","quarters":"quarter","qtr":"quarter",
+        "year":"year","years":"year","yr":"year","yrs":"year",
         /* --- Labor --- */
         "man-hour":"mh","man hour":"mh","manhour":"mh","man-hours":"mh","mh":"mh",
         "man-day":"md","man day":"md","manday":"md","man-days":"md","md":"md",
@@ -1107,6 +1143,8 @@ function buildColumnPlan(raw,tpl,dataRows){
 
 let STATE={tplKey:null,headers:[],rows:[],issues:[],cellFlags:{},origin:{}};
 let SAVED_MARKUP=null;   /* global markup computed on first pass, kept across rechecks */
+let CAT_CASE="proper";   /* Cost_Category casing: "proper" or "upper" */
+let UPLOADED_NAME="";    /* base name of the uploaded file, for export naming */
 let SAVED_OVERRIDE="";   /* user's manual markup override, kept across rechecks */
 let IS_RECHECK=false;    /* true when runCheck is triggered by an in-app action, not a fresh check */
 
@@ -1154,6 +1192,7 @@ function matchCanonical(raw,tplHeaders){
 
 function runCheck(){
   if(!IS_RECHECK){ SAVED_MARKUP=null; SAVED_OVERRIDE=""; } /* fresh file/paste - recompute markup from scratch */
+  const _cc=document.getElementById("catcase"); CAT_CASE = _cc ? _cc.value : "proper";
   const raw=document.getElementById("src").value;
   const parsed=parseInput(raw);
   const checksEl=document.getElementById("checks");
@@ -1292,9 +1331,11 @@ function runCheck(){
       }
     }
     headers.forEach((h,ci)=>{
-      const rule=tpl.cols[h];
+      let rule=tpl.cols[h];
       let val=row[ci];
       if(!rule){ outRow.push(stripSpecials(val).v); return; }
+      /* Cost_Category casing toggle: user can pick UPPERCASE instead of Proper Case */
+      if(h==="Cost_Category" && CAT_CASE==="upper" && rule==="proper") rule="upper";
       const res=applyRule(rule,val,{allowance});
       let v=res.v;
       let worst=null;
@@ -1586,14 +1627,37 @@ function render(){
   /* table (paginated - only render a page of rows so large files stay responsive) */
   const wrap=document.getElementById("tblwrap");
   const PAGE=100;
-  const total=rows.length;
+  const headingSet=new Set(STATE.headingRows||[]);
+  /* which rows need attention? = has a review/error flag, or is a heading row.
+     (purely auto-fixed cells are already handled, so they don't count as needing attention) */
+  const flaggedRow=ri=>{
+    if(headingSet.has(ri)) return true;
+    for(let ci=0;ci<headers.length;ci++){ const f=cellFlags[ri+"_"+ci]; if(f==="review"||f==="error") return true; }
+    return false;
+  };
+  /* row filter toggle: when on, show only rows needing attention */
+  const filterOn = (()=>{ const f=document.getElementById("rowfilter"); return f?f.checked:false; })();
+  let visibleIdx=[];
+  for(let ri=0;ri<rows.length;ri++){ if(!filterOn || flaggedRow(ri)) visibleIdx.push(ri); }
+  /* show/enable the filter control now that there's output, and reflect how many match */
+  const fw=document.getElementById("rowfilterwrap");
+  if(fw){
+    const flaggedCount=(()=>{let n=0;for(let ri=0;ri<rows.length;ri++)if(flaggedRow(ri))n++;return n;})();
+    fw.style.display = flaggedCount>0 ? "inline-flex" : "none";
+    const lbl=fw.childNodes[fw.childNodes.length-1];
+    if(lbl) lbl.textContent=" Show only rows to review/fix ("+flaggedCount+")";
+  }
+  const total=visibleIdx.length;
   const pageCount=Math.max(1,Math.ceil(total/PAGE));
   if(STATE.page===undefined||STATE.page>=pageCount) STATE.page=0;
   const start=STATE.page*PAGE, end=Math.min(total,start+PAGE);
-  const headingSet=new Set(STATE.headingRows||[]);
   let html='';
+  if(filterOn && total===0){
+    html='<div class="empty"><b>Nothing to review</b>No rows need review or fixing. Untick the filter to see all rows.</div>';
+    wrap.innerHTML=html;
+  } else {
   if(total>PAGE){
-    html+='<div class="pager">Showing rows <b>'+(start+1)+'\u2013'+end+'</b> of '+total+
+    html+='<div class="pager">Showing '+(filterOn?'flagged ':'')+'rows <b>'+(start+1)+'\u2013'+end+'</b> of '+total+
       ' <button class="btn btn-small" id="pgprev"'+(STATE.page===0?' disabled':'')+'>\u2039 Prev</button>'+
       '<span class="pgnum">Page '+(STATE.page+1)+' / '+pageCount+'</span>'+
       '<button class="btn btn-small" id="pgnext"'+(STATE.page>=pageCount-1?' disabled':'')+'>Next \u203a</button></div>';
@@ -1601,7 +1665,8 @@ function render(){
   html+='<div class="tbl-scroll"><table><thead><tr><th></th>';
   headers.forEach(h=>{ html+='<th class="'+(tpl.required.includes(h)?'req':'')+'">'+esc(h)+'</th>'; });
   html+='</tr></thead><tbody>';
-  for(let ri=start; ri<end; ri++){
+  for(let vi=start; vi<end; vi++){
+    const ri=visibleIdx[vi];
     const r=rows[ri];
     const isHeadingRow=headingSet.has(ri);
     html+='<tr'+(isHeadingRow?' class="heading-row"':'')+'><td class="rownum">'+(ri+1)+
@@ -1620,6 +1685,7 @@ function render(){
   const pgp=document.getElementById("pgprev"), pgn=document.getElementById("pgnext");
   if(pgp) pgp.addEventListener("click",()=>{ STATE.page=Math.max(0,STATE.page-1); render(); });
   if(pgn) pgn.addEventListener("click",()=>{ STATE.page=STATE.page+1; render(); });
+  }
 
   /* inspection card */
   const checksEl=document.getElementById("checks");
@@ -1628,8 +1694,16 @@ function render(){
   } else {
     const order={error:0,review:1,fixed:2};
     const sorted=[...issues].sort((a,b)=>order[a.level]-order[b.level]);
+    const nErr=issues.filter(i=>i.level==="error").length;
+    const nRev=issues.filter(i=>i.level==="review").length;
+    const nFix=issues.filter(i=>i.level==="fixed").length;
+    const summary='<div class="checkcount">'+
+      (nErr?'<span class="cc cc-err">'+nErr+' error'+(nErr>1?'s':'')+'</span>':'')+
+      (nRev?'<span class="cc cc-rev">'+nRev+' to review</span>':'')+
+      (nFix?'<span class="cc cc-fix">'+nFix+' auto-fixed</span>':'')+
+      '</div>';
     const cap=120;
-    checksEl.innerHTML=sorted.slice(0,cap).map(i=>
+    checksEl.innerHTML=summary+sorted.slice(0,cap).map(i=>
       '<div class="check '+i.level+'"><span class="stamp">'+({fixed:"Fixed",review:"Review",error:"Error"})[i.level]+'</span><div class="msg">'+esc(i.msg)+'</div></div>'
     ).join("")+(sorted.length>cap?'<div class="footnote">'+(sorted.length-cap)+' more not shown.</div>':'');
   }
@@ -1667,6 +1741,7 @@ function render(){
 function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),1800);}
 
 document.getElementById("run").addEventListener("click",runCheck);
+document.getElementById("rowfilter").addEventListener("change",()=>{ if(STATE&&STATE.rows){ STATE.page=0; render(); } });
 
 document.getElementById("fillphase").addEventListener("click",()=>{
   const pi=STATE.headers.indexOf("Phase");
@@ -1770,7 +1845,8 @@ document.getElementById("xlsx").addEventListener("click",()=>{
   const wb=XLSX.utils.book_new();
   const sheetName=(STATE.tplKey||"import").slice(0,31);
   XLSX.utils.book_append_sheet(wb,ws,sheetName);
-  XLSX.writeFile(wb,(STATE.tplKey||"jack-import")+"-formatted.xlsx");
+  const base = UPLOADED_NAME ? UPLOADED_NAME : (STATE.tplKey||"jack-import");
+  XLSX.writeFile(wb, base+"-formatted.xlsx");
   toast("Excel file downloaded - numbers and text preserved");
 });
 let WORKBOOK=null;
@@ -1792,6 +1868,7 @@ function loadSheet(name){
 }
 document.getElementById("file").addEventListener("change",e=>{
   const f=e.target.files[0]; if(!f) return;
+  UPLOADED_NAME = f.name.replace(/\.[^.]+$/,""); /* remember base name (no extension) for export */
   const isExcel=/\.(xlsx|xlsm|xls)$/i.test(f.name);
   const rd=new FileReader();
   if(isExcel){
@@ -1840,6 +1917,18 @@ document.getElementById("sheet").addEventListener("change",e=>{ loadSheet(e.targ
   }
   sel.value="costings-estimate";
 })();
+/* show the Cost Category casing toggle only for estimate-type templates */
+function updateCaseRow(){
+  const tk=document.getElementById("tpl").value;
+  const isEst = tk==="costings-estimate" || (tk==="auto");
+  document.getElementById("caserow").style.display = isEst ? "block" : "none";
+}
+updateCaseRow();
+document.getElementById("tpl").addEventListener("change",updateCaseRow);
+/* re-run automatically when the casing choice changes (if there's already output) */
+document.getElementById("catcase").addEventListener("change",()=>{
+  if(document.getElementById("src").value.trim()){ IS_RECHECK=true; runCheck(); IS_RECHECK=false; }
+});
 /* keyboard: Ctrl+Enter runs check */
 document.getElementById("src").addEventListener("keydown",e=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter") runCheck(); });
 </script>
