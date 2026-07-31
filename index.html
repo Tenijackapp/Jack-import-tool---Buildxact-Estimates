@@ -152,7 +152,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 58)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 59)</span></span>
   </div>
 </header>
 
@@ -187,7 +187,10 @@ Slab pour		10/01/2026	1"></textarea>
           <select id="sheet"></select>
         </div>
       </div>
-      <button class="btn btn-primary" id="run">Check and format</button>
+      <div style="display:flex;gap:8px;margin-top:2px">
+        <button class="btn btn-primary" id="run" style="flex:1">Check and format</button>
+        <button class="btn btn-small" id="reset" title="Clear everything and start fresh">Load another file</button>
+      </div>
     </section>
 
     <!-- inspection -->
@@ -1773,6 +1776,31 @@ function render(){
 function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),1800);}
 
 document.getElementById("run").addEventListener("click",runCheck);
+document.getElementById("reset").addEventListener("click",()=>{
+  /* clear everything so a fresh file can be loaded, without reloading the page */
+  document.getElementById("src").value="";
+  const fileInput=document.getElementById("file"); if(fileInput) fileInput.value="";
+  document.getElementById("sheetrow").style.display="none";
+  const sheetSel=document.getElementById("sheet"); if(sheetSel) sheetSel.innerHTML="";
+  WORKBOOK=null; UPLOADED_NAME="";
+  SAVED_MARKUP=null; SAVED_OVERRIDE=""; CAT_CASE="proper";
+  STATE={tplKey:null,headers:[],rows:[],issues:[],cellFlags:{},origin:{}};
+  /* reset output area */
+  document.getElementById("tblwrap").innerHTML='<div class="empty"><b>Nothing checked yet</b>Paste your data above and hit Check and Format.<br>Cells in the result are editable. Changed cells show the old value crossed out.</div>';
+  document.getElementById("summary").innerHTML="";
+  document.getElementById("checks").innerHTML='<div class="footnote">Run a check to see results here. Fixed = corrected automatically. Review = look at it yourself. Error = must be resolved before import.</div>';
+  ["phasebar","estbar","headingbar","mkbar","uombar"].forEach(id=>{const el=document.getElementById(id); if(el) el.classList.remove("show");});
+  const rf=document.getElementById("rowfilterwrap"); if(rf) rf.style.display="none";
+  const rfc=document.getElementById("rowfilter"); if(rfc) rfc.checked=false;
+  const xbtn=document.getElementById("xlsx"); if(xbtn) xbtn.disabled=true;
+  document.getElementById("tplpill").textContent="No template detected";
+  document.getElementById("tplpill").classList.remove("on");
+  document.getElementById("tpl").value="costings-estimate";
+  const cc=document.getElementById("catcase"); if(cc) cc.value="proper";
+  if(typeof updateCaseRow==="function") updateCaseRow();
+  document.getElementById("src").focus();
+  toast("Cleared - ready for another file");
+});
 document.getElementById("rowfilter").addEventListener("change",()=>{ if(STATE&&STATE.rows){ STATE.page=0; render(); } });
 
 document.getElementById("fillphase").addEventListener("click",()=>{
