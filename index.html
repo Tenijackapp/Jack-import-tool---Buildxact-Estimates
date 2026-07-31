@@ -152,7 +152,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 57)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 58)</span></span>
   </div>
 </header>
 
@@ -1300,9 +1300,10 @@ function runCheck(){
     let headingSuspect=false;
     const rawUomVal = rawUomIdx>=0 ? rawRow[rawUomIdx] : "";
     if(itemColIdx>=0 && !separatorSuspect && isHeading(row[itemColIdx], ccColIdx>=0?row[ccColIdx]:undefined, row, rawUomVal)) headingSuspect=true;
-    /* blank Item -> delete (fine per cheatsheet). A row WITH an item name is always kept,
-       even if its price/qty/markup are all zero. */
-    if(itemColIdx>=0 && row[itemColIdx].trim()==="" && !separatorSuspect){ deletedItemRows.push(ri+2); return; }
+    /* blank Item -> FLAG for review (do not delete). Keep the row so it can be checked.
+       A row WITH an item name is always kept too, even if price/qty/markup are zero. */
+    let blankItemSuspect=false;
+    if(itemColIdx>=0 && row[itemColIdx].trim()==="" && !separatorSuspect) blankItemSuspect=true;
     const rowIdx=rows.length;
     const outRow=[];
     /* allowance detection first for estimates */
@@ -1364,8 +1365,14 @@ function runCheck(){
       }
       /* required blank check */
       if(tpl.required.includes(h)&&v.trim()===""){
-        issues.push({row:rowIdx,col:ci,level:"error",msg:h+" (row "+(rowIdx+1)+"): required field is blank"});
-        worst="error";
+        if(tpl.estimate && h==="Item"){
+          /* blank Item is kept and flagged for review in the bar above - soft note, not a blocking error */
+          issues.push({row:rowIdx,col:ci,level:"review",msg:h+" (row "+(rowIdx+1)+"): no Item name - review whether this row is needed"});
+          if(worst!=="error") worst="review";
+        } else {
+          issues.push({row:rowIdx,col:ci,level:"error",msg:h+" (row "+(rowIdx+1)+"): required field is blank"});
+          worst="error";
+        }
       }
       if(worst) cellFlags[rowIdx+"_"+ci]=worst;
       if(v!==String(row[ci]).trim()&&String(row[ci]).trim()!=="") origin[rowIdx+"_"+ci]=String(row[ci]).trim();
@@ -1431,11 +1438,14 @@ function runCheck(){
         issues.push({row:rowIdx,col:tnI,level:"review",msg:'Trading_Name "'+outRow[tnI]+'" (row '+(rowIdx+1)+") looks like a person's name - kept as-is, but review whether it should be a contact"});
       }
     }
-    if(headingSuspect || separatorSuspect){
+    if(headingSuspect || separatorSuspect || blankItemSuspect){
       headingRows.push(rowIdx);
       const flagCol = itemColIdx>=0 ? itemColIdx : 0;
       cellFlags[rowIdx+"_"+flagCol]="review";
-      const why = headingSuspect ? "looks like a section heading, not a real line" : "looks like a separator row (just dashes)";
+      let why;
+      if(headingSuspect) why="looks like a section heading, not a real line";
+      else if(separatorSuspect) why="looks like a separator row (just dashes)";
+      else why="has no Item name - check whether it's needed";
       issues.push({row:rowIdx,col:flagCol,level:"review",msg:'Row '+(rowIdx+1)+': '+why+' - review in the bar above the table before importing'});
     }
     rows.push(outRow);
@@ -1443,7 +1453,6 @@ function runCheck(){
   });
 
   if(blankRows.length) issues.push({row:-1,col:-1,level:"fixed",msg:"Removed "+blankRows.length+" completely blank row(s)"});
-  if(deletedItemRows.length) issues.push({row:-1,col:-1,level:"fixed",msg:"Deleted "+deletedItemRows.length+" row(s) with a blank Item (no item name) - source rows "+deletedItemRows.join(", ")});
 
   /* ===== Qty verification: Qty should equal Total / Price_Each (fixes rounded quantities) ===== */
   if(tpl.estimate){
