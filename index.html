@@ -146,7 +146,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 51)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 52)</span></span>
   </div>
 </header>
 
@@ -803,6 +803,12 @@ function applyRule(rule,val,ctx){
         break;
       }
       const orig=v;
+      /* a fully numeric UOM (no letters at all) is wrong - it's a qty/price in the unit column.
+         Flag it as an error so the cell shows red and stands out. */
+      if(/^[\d.,$\s]+$/.test(v.trim()) && /\d/.test(v)){
+        issues.push({level:"error",msg:'UOM "'+v.trim()+'" is a number, not a unit - looks like a quantity or price landed in the UOM column'});
+        break;
+      }
       let low=v.toLowerCase().replace(/\s+/g," ").trim();
       /* strip a leading "/" or "per " (a "per X" notation is the same unit as "X"):
          "/bag" = "per bag" = "bag";  "perjob" = "per job" = "job".
