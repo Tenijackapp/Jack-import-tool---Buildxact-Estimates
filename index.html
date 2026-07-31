@@ -134,7 +134,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 43)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 44)</span></span>
   </div>
 </header>
 
@@ -183,7 +183,7 @@ Slab pour		10/01/2026	1"></textarea>
       <button class="btn btn-small" id="delblank">Delete those rows</button>
     </div>
     <div class="phasebar" id="headingbar">
-      <span>⚠ <b id="headingcount"></b> row(s) flagged for review: <b>section headings, blank items, or separators</b>. Nothing is deleted automatically - review, then remove if needed.</span>
+      <span>⚠ <b id="headingcount"></b> row(s) flagged for review: <b>section headings or separators</b>. Nothing is deleted automatically - review, then remove if needed. (Items with a name are always kept, even at $0.)</span>
       <button class="btn btn-small" id="delheadings">Delete all flagged</button>
     </div>
     <div class="phasebar" id="mkbar">
@@ -1116,9 +1116,9 @@ const HEADER_ALIASES={
   "Item_Name":["itemname","itemnames","task","scheduleitem"],
   "Cost_Category":["category","costcategory","categorydescription","categorydesc","costcat"],
   "Cost_Group":["group","costgroup"],
-  "Price_Each":["price","priceeach","unitprice","rate","priceperunit","unitcost","cost","costeach","unitrate","costperunit","unitcostexgst","priceexgst"],
+  "Price_Each":["estimatedunitcost","priceeach","unitprice","rate","priceperunit","unitcost","price","costeach","unitrate","costperunit","unitcostexgst","priceexgst"],
   "Price_exGST":["priceexgst","priceexcgst","price","unitprice"],
-  "Qty":["qty","quantity","quantities","qtys","qtty","qnty","no","nos","number","count","itemcount","noofitems","numberofitems","noofunits","numberofunits","qtyrequired","orderqty","numberrequired","amountofitems"],
+  "Qty":["estimatedqty","qty","quantity","quantities","qtys","qtty","qnty","no","nos","number","count","itemcount","noofitems","numberofitems","noofunits","numberofunits","qtyrequired","orderqty","numberrequired","amountofitems"],
   "UOM":["uom","unit","units","unitofmeasure","unitofmeasurement"],
   "Type":["type","costtype"],
   "Specification":["spec","specification","specs","notes"],
@@ -1196,7 +1196,7 @@ function runCheck(){
   /* raw source UOM column, so we can read the original "Heading" flag before UOM gets standardised */
   const rawUomIdx = tpl.estimate ? rawHeaders.findIndex(h=>normH(h)==="uom") : -1;
   /* raw source Total column (line total incl qty) - the reliable base for the markup percentage */
-  const rawTotalIdx = tpl.estimate ? rawHeaders.findIndex(h=>{const n=normH(h);return n==="total"||n==="linetotal"||n==="amount"||n==="subtotal";}) : -1;
+  const rawTotalIdx = tpl.estimate ? rawHeaders.findIndex(h=>{const n=normH(h);return n==="total"||n==="linetotal"||n==="amount"||n==="subtotal"||n==="estimatedcost"||n==="estimatedtotal";}) : -1;
   /* a cell that is only dashes/underscores/dots/spaces is a visual separator, not real data */
   const isSeparator = s => { const t=String(s).trim(); return t!=="" && /^[-_=.\u2013\u2014\s]+$/.test(t); };
   /* normalise for heading comparison: letters+digits only, lowercased */
@@ -1248,10 +1248,10 @@ function runCheck(){
     /* flag heading rows (Item is a section label, not a real line item) - do NOT auto-delete, warn instead */
     let headingSuspect=false;
     const rawUomVal = rawUomIdx>=0 ? rawRow[rawUomIdx] : "";
-    if(itemColIdx>=0 && isHeading(row[itemColIdx], ccColIdx>=0?row[ccColIdx]:undefined, row, rawUomVal)) headingSuspect=true;
-    /* rows with a blank Item - FLAG for review, don't delete (may be a category subtotal you want) */
-    let blankItemSuspect=false;
-    if(itemColIdx>=0 && row[itemColIdx].trim()==="") blankItemSuspect=true;
+    if(itemColIdx>=0 && !separatorSuspect && isHeading(row[itemColIdx], ccColIdx>=0?row[ccColIdx]:undefined, row, rawUomVal)) headingSuspect=true;
+    /* blank Item -> delete (fine per cheatsheet). A row WITH an item name is always kept,
+       even if its price/qty/markup are all zero. */
+    if(itemColIdx>=0 && row[itemColIdx].trim()==="" && !separatorSuspect){ deletedItemRows.push(ri+2); return; }
     const rowIdx=rows.length;
     const outRow=[];
     /* allowance detection first for estimates */
@@ -1311,14 +1311,8 @@ function runCheck(){
       }
       /* required blank check */
       if(tpl.required.includes(h)&&v.trim()===""){
-        if(tpl.estimate && h==="Item"){
-          /* blank Item on an estimate is already flagged in the review bar - note it softly, not a hard error */
-          issues.push({row:rowIdx,col:ci,level:"review",msg:h+" (row "+(rowIdx+1)+"): blank - review whether this row should be kept or removed"});
-          worst=worst==="error"?"error":"review";
-        } else {
-          issues.push({row:rowIdx,col:ci,level:"error",msg:h+" (row "+(rowIdx+1)+"): required field is blank"});
-          worst="error";
-        }
+        issues.push({row:rowIdx,col:ci,level:"error",msg:h+" (row "+(rowIdx+1)+"): required field is blank"});
+        worst="error";
       }
       if(worst) cellFlags[rowIdx+"_"+ci]=worst;
       if(v!==String(row[ci]).trim()&&String(row[ci]).trim()!=="") origin[rowIdx+"_"+ci]=String(row[ci]).trim();
@@ -1384,14 +1378,11 @@ function runCheck(){
         issues.push({row:rowIdx,col:tnI,level:"review",msg:'Trading_Name "'+outRow[tnI]+'" (row '+(rowIdx+1)+") looks like a person's name - kept as-is, but review whether it should be a contact"});
       }
     }
-    if(headingSuspect || blankItemSuspect || separatorSuspect){
+    if(headingSuspect || separatorSuspect){
       headingRows.push(rowIdx);
       const flagCol = itemColIdx>=0 ? itemColIdx : 0;
       cellFlags[rowIdx+"_"+flagCol]="review";
-      let why;
-      if(headingSuspect) why="looks like a section heading, not a real line";
-      else if(separatorSuspect) why="looks like a separator row (just dashes)";
-      else why="has a blank Item (may be a category subtotal)";
+      const why = headingSuspect ? "looks like a section heading, not a real line" : "looks like a separator row (just dashes)";
       issues.push({row:rowIdx,col:flagCol,level:"review",msg:'Row '+(rowIdx+1)+': '+why+' - review in the bar above the table before importing'});
     }
     rows.push(outRow);
@@ -1399,6 +1390,7 @@ function runCheck(){
   });
 
   if(blankRows.length) issues.push({row:-1,col:-1,level:"fixed",msg:"Removed "+blankRows.length+" completely blank row(s)"});
+  if(deletedItemRows.length) issues.push({row:-1,col:-1,level:"fixed",msg:"Deleted "+deletedItemRows.length+" row(s) with a blank Item (no item name) - source rows "+deletedItemRows.join(", ")});
 
   /* ===== Qty verification: Qty should equal Total / Price_Each (fixes rounded quantities) ===== */
   if(tpl.estimate){
