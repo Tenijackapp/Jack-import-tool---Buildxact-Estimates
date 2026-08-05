@@ -152,7 +152,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 59)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 61)</span></span>
   </div>
 </header>
 
@@ -1211,7 +1211,12 @@ function runCheck(){
   const raw=document.getElementById("src").value;
   const parsed=parseInput(raw);
   const checksEl=document.getElementById("checks");
-  if(!parsed||parsed.length<1){ checksEl.innerHTML='<div class="check error"><span class="stamp">Error</span><div class="msg">Nothing to check - paste your data first (headers included).</div></div>'; return; }
+  const tblwrapEl=document.getElementById("tblwrap");
+  const showBlockingError=(msg)=>{
+    checksEl.innerHTML='<div class="check error"><span class="stamp">Error</span><div class="msg">'+msg+'</div></div>';
+    if(tblwrapEl) tblwrapEl.innerHTML='<div class="empty"><b>Couldn\u2019t format this</b>'+msg+'</div>';
+  };
+  if(!parsed||parsed.length<1){ showBlockingError("Nothing to check - paste your data first, or open a file (headers must be in the first row)."); return; }
 
   let tplKey=document.getElementById("tpl").value;
   let headers=parsed[0].map(h=>String(h).trim());
@@ -1227,7 +1232,7 @@ function runCheck(){
 
   if(tplKey==="auto"){
     tplKey=detectTemplate(headers);
-    if(!tplKey){ checksEl.innerHTML='<div class="check error"><span class="stamp">Error</span><div class="msg">Could not match your headers to a JACK template. Pick the template manually from the dropdown, or check the first row contains the template headers.</div></div>'; return; }
+    if(!tplKey){ showBlockingError("Could not match your headers to a template. Pick the template manually from the dropdown (e.g. Contractors Contacts or Suppliers Contacts), and check the first row of your data contains the column headers."); return; }
   }
   const tpl=TEMPLATES[tplKey];
   const rawHeaders=headers;
@@ -1303,10 +1308,9 @@ function runCheck(){
     let headingSuspect=false;
     const rawUomVal = rawUomIdx>=0 ? rawRow[rawUomIdx] : "";
     if(itemColIdx>=0 && !separatorSuspect && isHeading(row[itemColIdx], ccColIdx>=0?row[ccColIdx]:undefined, row, rawUomVal)) headingSuspect=true;
-    /* blank Item -> FLAG for review (do not delete). Keep the row so it can be checked.
-       A row WITH an item name is always kept too, even if price/qty/markup are zero. */
-    let blankItemSuspect=false;
-    if(itemColIdx>=0 && row[itemColIdx].trim()==="" && !separatorSuspect) blankItemSuspect=true;
+    /* blank Item -> DELETE the row immediately (no item name = nothing to import).
+       A row WITH an item name is always kept, even if price/qty/markup are zero. */
+    if(itemColIdx>=0 && row[itemColIdx].trim()==="" && !separatorSuspect && !headingSuspect){ deletedItemRows.push(ri+2); return; }
     const rowIdx=rows.length;
     const outRow=[];
     /* allowance detection first for estimates */
@@ -1441,14 +1445,11 @@ function runCheck(){
         issues.push({row:rowIdx,col:tnI,level:"review",msg:'Trading_Name "'+outRow[tnI]+'" (row '+(rowIdx+1)+") looks like a person's name - kept as-is, but review whether it should be a contact"});
       }
     }
-    if(headingSuspect || separatorSuspect || blankItemSuspect){
+    if(headingSuspect || separatorSuspect){
       headingRows.push(rowIdx);
       const flagCol = itemColIdx>=0 ? itemColIdx : 0;
       cellFlags[rowIdx+"_"+flagCol]="review";
-      let why;
-      if(headingSuspect) why="looks like a section heading, not a real line";
-      else if(separatorSuspect) why="looks like a separator row (just dashes)";
-      else why="has no Item name - check whether it's needed";
+      const why = headingSuspect ? "looks like a section heading, not a real line" : "looks like a separator row (just dashes)";
       issues.push({row:rowIdx,col:flagCol,level:"review",msg:'Row '+(rowIdx+1)+': '+why+' - review in the bar above the table before importing'});
     }
     rows.push(outRow);
@@ -1456,6 +1457,7 @@ function runCheck(){
   });
 
   if(blankRows.length) issues.push({row:-1,col:-1,level:"fixed",msg:"Removed "+blankRows.length+" completely blank row(s)"});
+  if(deletedItemRows.length) issues.push({row:-1,col:-1,level:"fixed",msg:"Deleted "+deletedItemRows.length+" row(s) with a blank Item (no item name)"});
 
   /* ===== Qty verification: Qty should equal Total / Price_Each (fixes rounded quantities) ===== */
   if(tpl.estimate){
@@ -1661,7 +1663,7 @@ function render(){
 
   /* table (paginated - only render a page of rows so large files stay responsive) */
   const wrap=document.getElementById("tblwrap");
-  const PAGE=100;
+  const PAGE=5000; /* effectively one page - show the whole file at once */
   const headingSet=new Set(STATE.headingRows||[]);
   /* which rows need attention? = has a review/error flag, or is a heading row.
      (purely auto-fixed cells are already handled, so they don't count as needing attention) */
@@ -1759,9 +1761,16 @@ function render(){
       const btn=e.target.closest&&e.target.closest(".delrow");
       if(btn){
         const idx=+btn.dataset.del;
+        /* remember scroll position so we don't jump back to the top after re-render */
+        const scroller=wrap.querySelector(".tbl-scroll");
+        const savedTop=scroller?scroller.scrollTop:0;
+        const savedLeft=scroller?scroller.scrollLeft:0;
         STATE.rows.splice(idx,1);
         recheckFromState();
-        toast("Heading row deleted");
+        /* restore scroll after the fresh render */
+        const newScroller=document.getElementById("tblwrap").querySelector(".tbl-scroll");
+        if(newScroller){ newScroller.scrollTop=savedTop; newScroller.scrollLeft=savedLeft; }
+        toast("Row deleted");
       }
     });
   }
