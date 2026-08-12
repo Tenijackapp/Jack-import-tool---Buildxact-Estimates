@@ -155,7 +155,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 73)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 74)</span></span>
   </div>
 </header>
 
@@ -2142,26 +2142,32 @@ document.getElementById("xlsx").addEventListener("click",()=>{
 
   /* Contacts / Clients: one workbook with review tabs like your finished files */
   const nameOnly=new Set(STATE.nameOnlyRows||[]);
-  const importIdx=[]; STATE.rows.forEach((r,i)=>{ if(!nameOnly.has(i)) importIdx.push(i); });
-  const importRows = importIdx.map(i=>STATE.rows[i]);
-  const nameOnlyIdx = (STATE.nameOnlyRows||[]);
-  const nameOnlyRows = nameOnlyIdx.map(i=>STATE.rows[i]);
   const CF=STATE.cellFlags||{};
   /* resolver: given the exported (subset) row + col, look up the ORIGINAL row's flag */
   const flagFor=idxList=>(er,c)=>{ const orig=idxList[er]; return orig===undefined?null:CF[orig+"_"+c]; };
 
-  /* duplicate emails: gather every row involved in a clash, with a "Duplicated_With" note */
+  /* duplicate emails: gather every row involved in a clash, with a "Duplicated_With" note.
+     These are pulled OUT of the Import sheet so nothing that JACK would reject gets imported;
+     the user reviews this sheet and manually adds back whichever ones they want. */
   const groups=STATE.dupGroups||{};
   const dupHeaders=[...headers,"Duplicated_With"];
   const dupRows=[]; const dupIdx=[];
+  const dupSet=new Set();
   Object.keys(groups).forEach(email=>{
     const members=groups[email];
     members.forEach(m=>{
       const r=STATE.rows[m.row]; if(!r) return;
       const others=members.filter(x=>x.row!==m.row).map(x=>x.name).join(", ");
       dupRows.push([...r, others+" (shared "+email+")"]); dupIdx.push(m.row);
+      dupSet.add(m.row);
     });
   });
+
+  /* Import = everything that is NOT name-only and NOT a duplicate */
+  const importIdx=[]; STATE.rows.forEach((r,i)=>{ if(!nameOnly.has(i) && !dupSet.has(i)) importIdx.push(i); });
+  const importRows = importIdx.map(i=>STATE.rows[i]);
+  const nameOnlyIdx = (STATE.nameOnlyRows||[]);
+  const nameOnlyRows = nameOnlyIdx.map(i=>STATE.rows[i]);
 
   const wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, buildSheet(importRows, headers, tpl, flagFor(importIdx)), "Import");
@@ -2175,7 +2181,7 @@ document.getElementById("xlsx").addEventListener("click",()=>{
     ["Sheet","What it is"],
     ["Import","Clean, ready-to-import contacts. Load this one into JACK."],
     ["Name Only","Contacts with a name (and maybe an ABN) but no email or phone/mobile. Keep them here; they can be added to JACK later as blank records."],
-    ["Duplicated Emails","Contacts that share an email with another contact. JACK rejects duplicate emails, so reconcile or merge these before importing. The Duplicated_With column shows who each one clashes with."],
+    ["Duplicated Emails","Contacts that share an email with another contact. These are kept OUT of the Import sheet (JACK rejects duplicate emails), so review them here and manually add back whichever ones you want. The Duplicated_With column shows who each one clashes with."],
     [""],
     ["Highlight colours in the tool","Meaning"],
     ["Yellow","Fixed automatically"],
