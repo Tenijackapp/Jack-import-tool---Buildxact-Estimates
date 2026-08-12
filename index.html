@@ -155,7 +155,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 70)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 73)</span></span>
   </div>
 </header>
 
@@ -633,6 +633,10 @@ function fmtPhone(raw){
   let s=String(raw).trim();
   if(!s) return {v:""};
   s=s.replace(/\.0+$/,"");                 /* kill decimal artifacts like 412345678.0 */
+  /* a phone field should be digits/spaces/+()- only. If it contains letters (e.g. a
+     country name like "Australia" landed in the phone column), flag it as an error
+     and keep the value so it stays visible/highlighted. */
+  if(/[A-Za-z]/.test(s)) return {v:s, error:'"'+s+'" is not a valid phone number (contains text) - fix or clear before importing'};
   let digits=s.replace(/[^\d+]/g,"");
   /* strip country code 61 (with or without +), and a following trunk 0 */
   if(digits.startsWith("+61")) digits=digits.slice(3);
@@ -648,6 +652,9 @@ function fmtPhone(raw){
   if(/^1800\d{6}$/.test(digits)) return {v:digits.replace(/(1800)(\d{3})(\d{3})/,"$1 $2 $3"),note:"standardised 1800"};
   if(/^13\d{4}$/.test(digits)) return {v:digits.replace(/(13)(\d{2})(\d{2})/,"$1 $2 $3"),note:"standardised 13"};
   if(/^0[2378]\d{8}$/.test(digits)) return {v:digits.slice(0,2)+" "+digits.slice(2,6)+" "+digits.slice(6),note:"standardised landline"};
+  /* short landline: area code + only 7 digits (needs 8) - one digit missing.
+     Keep the value but flag it; don't guess the missing digit. */
+  if(/^0[2378]\d{7}$/.test(digits)) return {v:s.replace(/\s+/g," ").trim(),warn:'phone "'+s+'" looks one digit short for a landline - please check and fix'};
   /* bare 8-digit landline with no area code - can't reformat reliably, blank + flag */
   if(/^\d{8}$/.test(digits)) return {v:"",warn:'phone "'+s+'" has no area code - blanked, enter manually'};
   return {v:s,warn:'phone "'+s+'" does not match an Australian format - please review'};
@@ -837,7 +844,8 @@ function applyRule(rule,val,ctx){
     case "phone": {
       if(!v) break;
       const p=fmtPhone(v);
-      if(p.warn) issues.push({level:"review",msg:p.warn});
+      if(p.error) issues.push({level:"error",msg:p.error});
+      else if(p.warn) issues.push({level:"review",msg:p.warn});
       else if(p.v!==v && p.note) issues.push({level:"fixed",msg:p.note});
       v=p.v;
       break;
@@ -853,11 +861,32 @@ function applyRule(rule,val,ctx){
     }
     case "state": {
       if(!v) break;
-      const map={"new south wales":"NSW","victoria":"VIC","queensland":"QLD","western australia":"WA","south australia":"SA","tasmania":"TAS","australian capital territory":"ACT","northern territory":"NT"};
-      let up=v.toUpperCase().trim();
-      if(map[v.toLowerCase()]){ up=map[v.toLowerCase()]; issues.push({level:"fixed",msg:"state abbreviated to "+up}); }
-      else if(AU_STATES.includes(up)){ if(up!==v) issues.push({level:"fixed",msg:"state uppercased"}); }
-      else issues.push({level:"error",msg:'"'+v+'" is not an Australian state ('+AU_STATES.join(", ")+")"});
+      /* normalise: strip periods/extra spaces, then map any full name or variant to the abbreviation */
+      const clean=v.replace(/\./g," ").replace(/\s+/g," ").trim();
+      const key=clean.toLowerCase();
+      const map={
+        "new south wales":"NSW","nsw":"NSW",
+        "victoria":"VIC","vic":"VIC",
+        "queensland":"QLD","qld":"QLD","qeensland":"QLD","queenland":"QLD",
+        "western australia":"WA","wa":"WA","w australia":"WA",
+        "south australia":"SA","sa":"SA","s australia":"SA",
+        "tasmania":"TAS","tas":"TAS","tassie":"TAS",
+        "australian capital territory":"ACT","act":"ACT","canberra":"ACT",
+        "northern territory":"NT","nt":"NT"
+      };
+      let up;
+      if(map[key]){
+        up=map[key];
+        if(up!==v) issues.push({level:"fixed",msg:'state standardised to "'+up+'"'});
+      } else if(map[key.replace(/\s+/g,"")]){
+        /* spaced-out abbreviation like "N S W" (from "N.S.W.") */
+        up=map[key.replace(/\s+/g,"")];
+        issues.push({level:"fixed",msg:'state standardised to "'+up+'"'});
+      } else {
+        up=clean.replace(/\s+/g,"").toUpperCase();
+        if(AU_STATES.includes(up)){ if(up!==v) issues.push({level:"fixed",msg:"state uppercased"}); }
+        else issues.push({level:"error",msg:'"'+v+'" is not an Australian state ('+AU_STATES.join(", ")+")"});
+      }
       v=up;
       break;
     }
@@ -1534,6 +1563,17 @@ function runCheck(){
        -> company / Trading_Name. */
     if(tpl.contactFallback){
       const tnI=headers.indexOf("Trading_Name");
+      /* R3: if Contact1 has no email/mobile, copy the business Email/Phone down into it,
+         so a supplier with only a business phone still gets a reachable Contact1
+         (which then triggers the "[Business] Admin" naming below, matching hand-formatting). */
+      const bEmailI=headers.indexOf("Email"), bPhoneI=headers.indexOf("Phone");
+      const c1eI=headers.indexOf("Contact1_Email"), c1mI=headers.indexOf("Contact1_Mobile");
+      if(c1eI>=0 && !outRow[c1eI] && bEmailI>=0 && outRow[bEmailI]){
+        outRow[c1eI]=outRow[bEmailI]; cellFlags[rowIdx+"_"+c1eI]="fixed";
+      }
+      if(c1mI>=0 && !outRow[c1mI] && bPhoneI>=0 && outRow[bPhoneI]){
+        outRow[c1mI]=outRow[bPhoneI]; cellFlags[rowIdx+"_"+c1mI]="fixed";
+      }
       [["Contact1_First_Name","Contact1_Last_Name","Contact1_Email","Contact1_Mobile"],
        ["Contact2_First_Name","Contact2_Last_Name","Contact2_Email","Contact2_Mobile"]].forEach(([fn,ln,em,mo])=>{
         const fi=headers.indexOf(fn), li=headers.indexOf(ln), ei=headers.indexOf(em), mi=headers.indexOf(mo);
@@ -2052,31 +2092,37 @@ function colNumFormat(rule){
   if(t==="num") return "0";
   return null; /* not numeric -> keep as text */
 }
-function buildSheet(rows, headers, tpl){
+function buildSheet(rows, headers, tpl, flagAt){
   const fmts=headers.map(h=>colNumFormat((tpl&&tpl.cols||{})[h]));
   const aoa=[headers, ...rows];
   const ws={};
   const range={s:{r:0,c:0},e:{r:Math.max(0,aoa.length-1),c:Math.max(0,headers.length-1)}};
+  const RED={patternType:"solid",fgColor:{rgb:"FFC22A16"},bgColor:{rgb:"FFC22A16"}};
+  const WHITEBOLD={color:{rgb:"FFFFFFFF"},bold:true};
   aoa.forEach((row,r)=>{
     (row||[]).forEach((val,c)=>{
       const addr=XLSX.utils.encode_cell({r,c});
       const raw=(val===undefined||val===null)?"":String(val);
       if(r===0){ ws[addr]={t:"s",v:raw}; return; }
       const fmt=fmts[c];
+      let cell;
       if(fmt!==null && raw.trim()!=="" && !isNaN(parseFloat(raw.replace(/[$,%\s]/g,"")))){
-        ws[addr]={t:"n",v:parseFloat(raw.replace(/[$,%\s]/g,"")),z:fmt};
+        cell={t:"n",v:parseFloat(raw.replace(/[$,%\s]/g,"")),z:fmt};
       } else {
-        ws[addr]={t:"s",v:raw};
+        cell={t:"s",v:raw};
       }
+      /* keep error cells highlighted red in the exported Excel */
+      if(flagAt && flagAt(r-1,c)==="error"){ cell.s={fill:RED,font:WHITEBOLD}; }
+      ws[addr]=cell;
     });
   });
   ws["!ref"]=XLSX.utils.encode_range(range);
   ws["!cols"]=headers.map(h=>({wch:Math.max(10,Math.min(40,h.length+4))}));
   return ws;
 }
-function downloadRows(rows, headers, tpl, filename, sheetName){
+function downloadRows(rows, headers, tpl, filename, sheetName, flagAt){
   const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,buildSheet(rows,headers,tpl),(sheetName||"import").slice(0,31));
+  XLSX.utils.book_append_sheet(wb,buildSheet(rows,headers,tpl,flagAt),(sheetName||"import").slice(0,31));
   XLSX.writeFile(wb, filename);
 }
 document.getElementById("xlsx").addEventListener("click",()=>{
@@ -2084,36 +2130,43 @@ document.getElementById("xlsx").addEventListener("click",()=>{
   const headers=STATE.headers;
   const isContact = tpl.contactRule || STATE.tplKey==="clients";
   const base = UPLOADED_NAME ? UPLOADED_NAME : (STATE.tplKey||"jack-import");
+  const CFest=STATE.cellFlags||{};
 
-  /* Estimates: single sheet as before */
+  /* Estimates: single sheet as before (errors stay highlighted) */
   if(!isContact){
-    downloadRows(STATE.rows, headers, tpl, base+"-formatted.xlsx", STATE.tplKey||"import");
+    downloadRows(STATE.rows, headers, tpl, base+"-formatted.xlsx", STATE.tplKey||"import",
+                 (r,c)=>CFest[r+"_"+c]);
     toast("Excel file downloaded - numbers and text preserved");
     return;
   }
 
   /* Contacts / Clients: one workbook with review tabs like your finished files */
   const nameOnly=new Set(STATE.nameOnlyRows||[]);
-  const importRows = STATE.rows.filter((r,i)=>!nameOnly.has(i));
-  const nameOnlyRows = (STATE.nameOnlyRows||[]).map(i=>STATE.rows[i]);
+  const importIdx=[]; STATE.rows.forEach((r,i)=>{ if(!nameOnly.has(i)) importIdx.push(i); });
+  const importRows = importIdx.map(i=>STATE.rows[i]);
+  const nameOnlyIdx = (STATE.nameOnlyRows||[]);
+  const nameOnlyRows = nameOnlyIdx.map(i=>STATE.rows[i]);
+  const CF=STATE.cellFlags||{};
+  /* resolver: given the exported (subset) row + col, look up the ORIGINAL row's flag */
+  const flagFor=idxList=>(er,c)=>{ const orig=idxList[er]; return orig===undefined?null:CF[orig+"_"+c]; };
 
   /* duplicate emails: gather every row involved in a clash, with a "Duplicated_With" note */
   const groups=STATE.dupGroups||{};
   const dupHeaders=[...headers,"Duplicated_With"];
-  const dupRows=[];
+  const dupRows=[]; const dupIdx=[];
   Object.keys(groups).forEach(email=>{
     const members=groups[email];
     members.forEach(m=>{
       const r=STATE.rows[m.row]; if(!r) return;
       const others=members.filter(x=>x.row!==m.row).map(x=>x.name).join(", ");
-      dupRows.push([...r, others+" (shared "+email+")"]);
+      dupRows.push([...r, others+" (shared "+email+")"]); dupIdx.push(m.row);
     });
   });
 
   const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, buildSheet(importRows, headers, tpl), "Import");
-  if(nameOnlyRows.length) XLSX.utils.book_append_sheet(wb, buildSheet(nameOnlyRows, headers, tpl), "Name Only");
-  if(dupRows.length)      XLSX.utils.book_append_sheet(wb, buildSheet(dupRows, dupHeaders, tpl), "Duplicated Emails");
+  XLSX.utils.book_append_sheet(wb, buildSheet(importRows, headers, tpl, flagFor(importIdx)), "Import");
+  if(nameOnlyRows.length) XLSX.utils.book_append_sheet(wb, buildSheet(nameOnlyRows, headers, tpl, flagFor(nameOnlyIdx)), "Name Only");
+  if(dupRows.length)      XLSX.utils.book_append_sheet(wb, buildSheet(dupRows, dupHeaders, tpl, flagFor(dupIdx)), "Duplicated Emails");
 
   /* Legend tab explaining the review lists + the highlight colours */
   const legendAoa=[
