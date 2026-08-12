@@ -137,6 +137,8 @@ td .was{display:block;color:var(--steel);font-size:10.5px;text-decoration:line-t
 .phasebar.show{display:flex}
 .phasebar.mkbar-info{background:#EAF6EC;border-color:#BFE3C6}
 .phasebar.mkbar-info b{color:#1F7A33}
+#dupbar{background:var(--err-bg);border-color:#E7B0A6}
+#dupbar b{color:var(--err)}
 .phasebar b{color:var(--warn)}
 
 .footnote{color:var(--steel);font-size:12px;margin-top:10px}
@@ -153,7 +155,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 63)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 70)</span></span>
   </div>
 </header>
 
@@ -184,7 +186,7 @@ Slab pour		10/01/2026	1"></textarea>
         <label for="file">Or open an Excel / CSV file</label>
         <input type="file" id="file" accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt">
         <div id="sheetrow" style="display:none;margin-top:6px">
-          <label for="sheet">Worksheet</label>
+          <label for="sheet">Worksheet (defaults to "Original" - change to format a different sheet)</label>
           <select id="sheet"></select>
         </div>
       </div>
@@ -228,6 +230,12 @@ Slab pour		10/01/2026	1"></textarea>
       <span>⚠ <b id="uomcount"></b> rows have <b>numbers in UOM</b> - these look like unit costs in the wrong column.</span>
       <button class="btn btn-small btn-fix" id="moveuom">Move them to Price_Each</button>
     </div>
+    <div class="phasebar" id="nameonlybar">
+      <span>⚠ <b id="nameonlycount"></b> <b>name-only contact(s)</b> (a name, maybe an ABN, but no email or phone/mobile). They go on the "Name Only" tab of the download, not the import. They can be added to JACK later as blank records.</span>
+    </div>
+    <div class="phasebar" id="dupbar">
+      <span>⛔ <b id="dupcount"></b> <b>duplicate email(s)</b> shared across different contacts. JACK rejects these - reconcile before importing. <span id="duplist" style="display:block;margin-top:4px;font-size:12px"></span></span>
+    </div>
     <div class="toolbar">
       <span class="pill" id="tplpill">No template detected</span>
       <label class="rowfilter" id="rowfilterwrap" style="display:none"><input type="checkbox" id="rowfilter"> Show only rows to review/fix</label>
@@ -268,27 +276,28 @@ const TEMPLATES = {
     name:"Clients",
     headers:["Name","Email","Mobile","Street_Address","Suburb_Town","Postcode","State"],
     required:["Name"],
-    cols:{Name:"proper",Email:"email",Mobile:"phone",Street_Address:"proper",Suburb_Town:"proper",Postcode:"postcode",State:"state"}
+    dupEmail:true,
+    cols:{Name:"personname",Email:"email",Mobile:"phone",Street_Address:"address",Suburb_Town:"title",Postcode:"postcode",State:"state"}
   },
   "contractors": {
     name:"Contractors Contacts",
     headers:["Trading_Name","Type","ABN","Registered_For_GST","Email","Phone","Website","Street_Address","Suburb_Town","Postcode","State","Contact1_First_Name","Contact1_Last_Name","Contact1_Email","Contact1_Mobile","Contact1_Job_Title","Contact2_First_Name","Contact2_Last_Name","Contact2_Email","Contact2_Mobile","Contact2_Job_Title"],
     required:["Trading_Name"],
     dupEmail:true, contactRule:true, contactFallback:true,
-    cols:{Trading_Name:"keepcase",Type:{t:"type-contact",def:"Contractor"},ABN:"abn",Registered_For_GST:"gst",
+    cols:{Trading_Name:"tradingname",Type:{t:"type-contact",def:"Contractor"},ABN:"abn",Registered_For_GST:"gst",
       Email:"email",Phone:"phone",Website:"url",Street_Address:"address",Suburb_Town:"title",Postcode:"postcode",State:"state",
-      Contact1_First_Name:"keepcase",Contact1_Last_Name:"keepcase",Contact1_Email:"email",Contact1_Mobile:"phone",Contact1_Job_Title:"title",
-      Contact2_First_Name:"keepcase",Contact2_Last_Name:"keepcase",Contact2_Email:"email",Contact2_Mobile:"phone",Contact2_Job_Title:"title"}
+      Contact1_First_Name:"personname",Contact1_Last_Name:"personname",Contact1_Email:"email",Contact1_Mobile:"phone",Contact1_Job_Title:"title",
+      Contact2_First_Name:"personname",Contact2_Last_Name:"personname",Contact2_Email:"email",Contact2_Mobile:"phone",Contact2_Job_Title:"title"}
   },
   "suppliers": {
     name:"Suppliers Contacts",
     headers:["Trading_Name","Type","ABN","Registered_For_GST","Email","Phone","Website","Street_Address","Suburb_Town","Postcode","State","Contact1_First_Name","Contact1_Last_Name","Contact1_Email","Contact1_Mobile","Contact1_Job_Title","Contact2_First_Name","Contact2_Last_Name","Contact2_Email","Contact2_Mobile","Contact2_Job_Title"],
     required:["Trading_Name"],
     dupEmail:true, contactRule:true, contactFallback:true,
-    cols:{Trading_Name:"keepcase",Type:{t:"type-contact",def:"Supplier"},ABN:"abn",Registered_For_GST:"gst",
+    cols:{Trading_Name:"tradingname",Type:{t:"type-contact",def:"Supplier"},ABN:"abn",Registered_For_GST:"gst",
       Email:"email",Phone:"phone",Website:"url",Street_Address:"address",Suburb_Town:"title",Postcode:"postcode",State:"state",
-      Contact1_First_Name:"keepcase",Contact1_Last_Name:"keepcase",Contact1_Email:"email",Contact1_Mobile:"phone",Contact1_Job_Title:"title",
-      Contact2_First_Name:"keepcase",Contact2_Last_Name:"keepcase",Contact2_Email:"email",Contact2_Mobile:"phone",Contact2_Job_Title:"title"}
+      Contact1_First_Name:"personname",Contact1_Last_Name:"personname",Contact1_Email:"email",Contact1_Mobile:"phone",Contact1_Job_Title:"title",
+      Contact2_First_Name:"personname",Contact2_Last_Name:"personname",Contact2_Email:"email",Contact2_Mobile:"phone",Contact2_Job_Title:"title"}
   },
   "catalogue-items": {
     name:"Catalogue Items",
@@ -434,7 +443,41 @@ function properCaseKeepCompany(s){
   }).join("");
 }
 
-const ROLE_LOCALS=["admin","accounts","account","info","sales","office","enquiries","enquiry","support","bookings","booking","reception","finance","payroll","orders","order","noreply","noreply","donotreply","contact","hello","mail","email","service","team","help","careers","hr","marketing","purchasing","estimating","estimates","tenders","quotes","quote"];
+function properCaseName(s){
+  /* Proper-case a trading/person name, but keep acronyms and short vowel-less
+     tokens uppercase, and preserve deliberate mixed-case brands. */
+  const t=String(s).trim();
+  if(!t) return t;
+  const KEEP_UP=new Set([...ACRONYMS,"ATO","ASIC","IGA","IKEA","KFC","QBCC","RACQ","AFP","ALSPEC","BHE","CMA","COR","ATF","NCM","SCDF","TWT","JB","BP","AMP","NAB","ANZ","GJ","PFD","CSR","GWA","DHL","TNT","3M","BOC","GPT","JELD","WEN"]);
+  const words=t.split(/(\s+)/);
+  return words.map(w=>{
+    if(/^\s*$/.test(w)) return w;
+    const bare=w.replace(/[^A-Za-z0-9]/g,"");
+    if(!bare) return w;
+    const up=bare.toUpperCase();
+    /* keep known acronyms/brands uppercase */
+    if(KEEP_UP.has(up)) return w.toUpperCase();
+    /* keep short (<=4) all-caps, vowel-less consonant tokens uppercase (SR, HNP, JSH) */
+    if(bare.length<=4 && bare===up && !/[AEIOU]/.test(up) && /^[A-Z]+$/.test(up)) return w.toUpperCase();
+    /* preserve deliberate mixed-case (EnergyAustralia, JB Hi-Fi, OneSource) - has a lowercase
+       followed by an uppercase inside the token */
+    if(/[a-z][A-Z]/.test(bare)) return w;
+    /* PTY/LTD -> Pty/Ltd handled by generic proper-casing below */
+    /* otherwise proper-case: first letter up, rest down, but handle Mc/Mac/O'/hyphen */
+    return w.replace(/[A-Za-z][A-Za-z'']*/g, word=>{
+      let x=word.toLowerCase();
+      x=x.charAt(0).toUpperCase()+x.slice(1);
+      /* O'Brien */
+      x=x.replace(/^O'([a-z])/,(m,c)=>"O'"+c.toUpperCase());
+      /* Mc + capital */
+      x=x.replace(/^Mc([a-z])/,(m,c)=>"Mc"+c.toUpperCase());
+      /* hyphenated: Kemp-Upton */
+      x=x.replace(/-([a-z])/g,(m,c)=>"-"+c.toUpperCase());
+      return x;
+    });
+  }).join("");
+}
+
 /* Australian postcode ranges per state (first-digit / band based) */
 function postcodeMatchesState(pc, state){
   const n=parseInt(String(pc).replace(/\D/g,""),10);
@@ -464,6 +507,7 @@ function looksLikePerson(name){
   /* each word looks like a name part: starts capital, rest letters (allow O'Brien, Mc, hyphen) */
   return words.every(w=>/^[A-Z][a-zA-Z''\-]+$/.test(w));
 }
+const ROLE_LOCALS=["admin","accounts","account","info","sales","office","enquiries","enquiry","support","bookings","booking","reception","finance","payroll","orders","order","noreply","donotreply","contact","hello","mail","email","service","team","help","careers","hr","marketing","purchasing","estimating","estimates","tenders","quotes","quote"];
 function extractNameFromEmail(email, businessName){
   if(!email) return null;
   const m=String(email).toLowerCase().match(/^([^@]+)@/);
@@ -659,6 +703,31 @@ function applyRule(rule,val,ctx){
       if(cleaned!==v){ issues.push({level:"fixed",msg:"trimmed extra spaces"}); v=cleaned; }
       break;
     }
+    case "personname": {
+      /* Contact person names: proper-case (warren -> Warren) but preserve McKillop,
+         O'Brien, hyphenated names, and known acronyms. Only flag if it actually changed. */
+      if(!v) break;
+      const cleaned=v.replace(/\s+/g," ").trim();
+      const pc=properCaseName(cleaned);
+      if(pc!==v){ issues.push({level:"fixed",msg:"name cased"}); v=pc; }
+      break;
+    }
+    case "tradingname": {
+      /* Trading name: strip stray leading symbols (+MITRE -> MITRE), collapse spaces,
+         then proper-case ALL-CAPS / all-lowercase words while KEEPING acronyms and
+         short vowel-less tokens uppercase. Flag for review since it can't be perfect. */
+      if(!v) break;
+      let s=v.replace(/^[^A-Za-z0-9(]+/,"").replace(/\s+/g," ").trim(); /* strip leading + . - etc */
+      const stripped = s!==v.replace(/\s+/g," ").trim();
+      const changedCase = properCaseName(s);
+      if(changedCase!==s){ s=changedCase; }
+      if(s!==v){
+        const note = stripped ? "cleaned trading name (stray symbol + casing)" : "trading name cased";
+        issues.push({level:"review",msg:note+' - verify "'+s+'"'});
+        v=s;
+      }
+      break;
+    }
     case "title": {
       /* Suburb / Job Title: Title Case ordinary words, keep acronyms & mixed tokens */
       if(!v) break;
@@ -689,13 +758,15 @@ function applyRule(rule,val,ctx){
       break;
     }
     case "type-contact": {
-      /* Supplier/Contractor Type: trim spaces, default when blank, flag non-standard values */
-      if(!v){ v=r.def; issues.push({level:"fixed",msg:'Type defaulted to "'+r.def+'"'}); break; }
-      v=v.replace(/\s+/g," ").trim();
-      const standard=["Supplier","Contractor","Subcontractor"];
-      const hit=standard.find(s=>s.toLowerCase()===v.toLowerCase());
-      if(hit){ if(hit!==v) issues.push({level:"fixed",msg:'Type standardised to "'+hit+'"'}); v=hit; }
-      else issues.push({level:"review",msg:'Type "'+v+'" is non-standard - only import if it exists in JACK (Settings > Data Setup > Supplier/Contractor Types)'});
+      /* Force Type to match the picked template: Suppliers -> "Supplier",
+         Contractors -> "Contractor". Whatever is in the input is overridden. */
+      const forced=r.def;
+      if(!v){ v=forced; issues.push({level:"fixed",msg:'Type set to "'+forced+'"'}); break; }
+      const cleaned=v.replace(/\s+/g," ").trim();
+      if(cleaned.toLowerCase()!==forced.toLowerCase()){
+        issues.push({level:"fixed",msg:'Type changed from "'+cleaned+'" to "'+forced+'" to match the selected template'});
+      }
+      v=forced;
       break;
     }
     case "sentence": {
@@ -1033,18 +1104,66 @@ function maybeTransformXero(parsed, chosenTpl){
   const flagIdx=0; /* first column */
   const idx={
     name:ciName, email:ciEmail, first:col("firstname"), last:col("lastname"),
-    tax:col("taxnumber"), phone:col("phonenumber"), mobile:col("mobilenumber"),
+    tax:(has("taxnumber")>=0?has("taxnumber"):has("abn")), phone:col("phonenumber"), mobile:col("mobilenumber"),
     website:col("website"),
     sa1:col("saaddressline1"), saCity:col("sacity"), saRegion:col("saregion"), saPost:col("sapostalcode"),
     po1:col("poaddressline1"), poCity:col("pocity"), poRegion:col("poregion"), poPost:col("popostalcode"),
     p1f:col("person1firstname"), p1l:col("person1lastname"), p1e:col("person1email"),
     p2f:col("person2firstname"), p2l:col("person2lastname"), p2e:col("person2email")
   };
+  /* Does this export actually have a leading S/C flag column?
+     In the ARF-style export, column 0 has a blank/unnamed header and its values are
+     just "S" or "C". In the Sloanbuild "Original" export, column 0 is *ContactName
+     (the business name), so there is NO flag column and we must not filter by it. */
+  const col0Header = String(hdr[0]==null?"":hdr[0]).trim().toLowerCase().replace(/[^a-z0-9]/g,"");
+  const col0IsName = col0Header==="contactname"; /* *ContactName -> contactname */
+  let hasFlagCol=false;
+  if(!col0IsName){
+    /* sample column 0 values: is every non-blank one just S or C? */
+    let sc=0, other=0;
+    for(let r=1;r<Math.min(parsed.length,40);r++){
+      const v=String((parsed[r]||[])[0]==null?"":parsed[r][0]).trim().toUpperCase();
+      if(v==="") continue;
+      if(v==="S"||v==="C") sc++; else other++;
+    }
+    hasFlagCol = sc>0 && other===0;
+  }
   /* which type are we building? map the dropdown choice to the S/C flag */
   let want=null, tplKey=chosenTpl;
-  if(chosenTpl==="suppliers") want="S";
-  else if(chosenTpl==="contractors") want="C";
+  if(chosenTpl==="suppliers") { want="S"; tplKey="suppliers"; }
+  else if(chosenTpl==="contractors") { want="C"; tplKey="contractors"; }
+  else if(chosenTpl==="clients") { want=null; tplKey="clients"; } /* customers: keep all */
   else { want=null; tplKey="suppliers"; } /* auto -> default to suppliers, keep all */
+  /* if there's no real S/C flag column, never filter by it - keep every row.
+     the Type is forced by the chosen template anyway. */
+  if(!hasFlagCol) want=null;
+
+  const get0=(row,i)=> (i>=0 && row[i]!=null) ? String(row[i]).trim() : "";
+
+  /* ===== CLIENTS target: build the 7-column Clients layout instead of contacts ===== */
+  if(tplKey==="clients"){
+    const CL=["Name","Email","Mobile","Street_Address","Suburb_Town","Postcode","State"];
+    const clout=[CL]; let clk=0;
+    for(let r=1;r<parsed.length;r++){
+      const row=parsed[r];
+      if(!row||row.every(c=>String(c==null?"":c).trim()==="")) continue;
+      const useSA = get0(row,idx.sa1)!=="";
+      const addr = useSA ? get0(row,idx.sa1) : get0(row,idx.po1);
+      const city = useSA ? get0(row,idx.saCity) : get0(row,idx.poCity);
+      const region = useSA ? get0(row,idx.saRegion) : get0(row,idx.poRegion);
+      const post = useSA ? get0(row,idx.saPost) : get0(row,idx.poPost);
+      /* Name: prefer a real person (FirstName + LastName), else the ContactName */
+      const fn=get0(row,idx.first), ln=get0(row,idx.last);
+      const name = (fn||ln) ? (fn+(ln?" "+ln:"")).trim() : get0(row,idx.name);
+      /* Mobile: prefer the mobile column, else the phone */
+      const mob = get0(row,idx.mobile) || get0(row,idx.phone);
+      const rec={ Name:name, Email:get0(row,idx.email), Mobile:mob,
+                  Street_Address:addr, Suburb_Town:city, Postcode:post, State:region };
+      clout.push(CL.map(k=>rec[k]||""));
+      clk++;
+    }
+    return {rows:clout, tplKey:"clients", note:"Xero customer export detected: mapped "+clk+" customer(s) to the Clients layout. Street address used where present, postal address as fallback."};
+  }
 
   const JACK=["Trading_Name","Type","ABN","Registered_For_GST","Email","Phone","Website","Street_Address","Suburb_Town","Postcode","State","Contact1_First_Name","Contact1_Last_Name","Contact1_Email","Contact1_Mobile","Contact1_Job_Title","Contact2_First_Name","Contact2_Last_Name","Contact2_Email","Contact2_Mobile","Contact2_Job_Title"];
   const get=(row,i)=> (i>=0 && row[i]!=null) ? String(row[i]).trim() : "";
@@ -1250,7 +1369,9 @@ function runCheck(){
   const deletedItemRows=[];
   const separatorRows=[];
   const headingRows=[];
+  const nameOnlyRows=[];
   const emailsSeen={};
+  const dupGroups={};
   const itemColIdx = tpl.estimate ? headers.indexOf("Item") : -1;
   const ccColIdx = tpl.estimate ? headers.indexOf("Cost_Category") : -1;
   /* raw source UOM column, so we can read the original "Heading" flag before UOM gets standardised */
@@ -1390,15 +1511,21 @@ function runCheck(){
        record's own fields (Email + Contact1_Email) is fine (spec 4.2) */
     if(tpl.dupEmail){
       const rowEmails=new Set();
+      const tnI=headers.indexOf("Trading_Name");
+      const myName = tnI>=0 ? (outRow[tnI]||("row "+(rowIdx+1))) : ("row "+(rowIdx+1));
       headers.forEach((h,ci)=>{
         if(/email/i.test(h)&&outRow[ci]){
           const e=outRow[ci].toLowerCase();
           if(rowEmails.has(e)) return; /* same email again in this same row - ignore */
           rowEmails.add(e);
           if(emailsSeen[e]!==undefined){
-            issues.push({row:rowIdx,col:ci,level:"error",msg:h+" (row "+(rowIdx+1)+'): duplicate email "'+e+'" (also on row '+(emailsSeen[e]+1)+") - JACK rejects duplicate emails even across types"});
+            const firstRow=emailsSeen[e].row, firstName=emailsSeen[e].name;
+            issues.push({row:rowIdx,col:ci,level:"error",msg:h+" (row "+(rowIdx+1)+'): duplicate email "'+e+'" - also on "'+firstName+'" (row '+(firstRow+1)+"). JACK rejects duplicate emails; merge or change one."});
             cellFlags[rowIdx+"_"+ci]="error";
-          } else emailsSeen[e]=rowIdx;
+            /* record the clashing pair for the review list */
+            dupGroups[e]=dupGroups[e]||[{row:firstRow,name:firstName}];
+            dupGroups[e].push({row:rowIdx,name:myName});
+          } else emailsSeen[e]={row:rowIdx,name:myName};
         }
       });
     }
@@ -1422,9 +1549,9 @@ function runCheck(){
           if(extracted.last && li>=0 && !outRow[li]){ outRow[li]=extracted.last; cellFlags[rowIdx+"_"+li]="review"; }
           issues.push({row:rowIdx,col:fi,level:"review",msg:fn+" (row "+(rowIdx+1)+'): inferred "'+extracted.first+(extracted.last?" "+extracted.last:"")+'" from the email - please verify'});
         } else if(tnI>=0 && outRow[tnI]){
-          outRow[fi]=outRow[tnI];
+          outRow[fi]=outRow[tnI]+" Admin";
           cellFlags[rowIdx+"_"+fi]="fixed";
-          issues.push({row:rowIdx,col:fi,level:"fixed",msg:fn+" (row "+(rowIdx+1)+"): was blank with a contact email/mobile - filled with the business name (JACK requires a first name)"});
+          issues.push({row:rowIdx,col:fi,level:"fixed",msg:fn+" (row "+(rowIdx+1)+'): no real contact person - set to "'+outRow[tnI]+' Admin" (JACK requires a first name)'});
         } else {
           issues.push({row:rowIdx,col:fi,level:"error",msg:fn+" (row "+(rowIdx+1)+"): required when the contact has an email or mobile - import will fail"});
           cellFlags[rowIdx+"_"+fi]="error";
@@ -1444,6 +1571,21 @@ function runCheck(){
       const tnI=headers.indexOf("Trading_Name");
       if(tnI>=0&&outRow[tnI]&&looksLikePerson(outRow[tnI])){
         issues.push({row:rowIdx,col:tnI,level:"review",msg:'Trading_Name "'+outRow[tnI]+'" (row '+(rowIdx+1)+") looks like a person's name - kept as-is, but review whether it should be a contact"});
+      }
+    }
+    /* name-only contact (all contact templates incl. Clients):
+       a row that has a NAME but NO way to reach them - no email AND no phone/mobile
+       anywhere in the row. Address, website, ABN, GST do NOT keep it out of this list. */
+    if(tpl.contactRule || tplKey==="clients"){
+      const nameCol = headers.indexOf("Trading_Name")>=0 ? headers.indexOf("Trading_Name") : headers.indexOf("Name");
+      if(nameCol>=0 && String(outRow[nameCol]||"").trim()!==""){
+        const reachCols=["Email","Phone","Mobile","Contact1_Email","Contact1_Mobile","Contact2_Email","Contact2_Mobile"];
+        const hasReach = reachCols.some(n=>{ const i=headers.indexOf(n); return i>=0 && String(outRow[i]||"").trim()!==""; });
+        if(!hasReach){
+          nameOnlyRows.push(rowIdx);
+          cellFlags[rowIdx+"_"+nameCol]="review";
+          issues.push({row:rowIdx,col:nameCol,level:"review",msg:'"'+outRow[nameCol]+'" (row '+(rowIdx+1)+') has no email or phone/mobile - move to a separate "Name Only" list before importing'});
+        }
       }
     }
     if(headingSuspect || separatorSuspect){
@@ -1579,7 +1721,7 @@ function runCheck(){
     }
   }
 
-  STATE={tplKey,headers,rows,issues,cellFlags,origin,markupInfo,headingRows,page:0};
+  STATE={tplKey,headers,rows,issues,cellFlags,origin,markupInfo,headingRows,nameOnlyRows,dupGroups,page:0};
   try{ render(); }
   catch(err){
     const w=document.getElementById("tblwrap");
@@ -1661,6 +1803,31 @@ function render(){
     if(suspect>0){ ub.classList.add("show"); document.getElementById("uomcount").textContent=suspect; }
     else ub.classList.remove("show");
   } else ub.classList.remove("show");
+
+  /* name-only contacts bar */
+  const nob=document.getElementById("nameonlybar");
+  const noCount=(STATE.nameOnlyRows||[]).length;
+  if(nob){
+    if(noCount>0){ nob.classList.add("show"); document.getElementById("nameonlycount").textContent=noCount; }
+    else nob.classList.remove("show");
+  }
+
+  /* duplicate emails review bar - list every clashing group in one place */
+  const dbar=document.getElementById("dupbar");
+  const groups=STATE.dupGroups||{};
+  const emails=Object.keys(groups);
+  if(dbar){
+    if(emails.length>0){
+      dbar.classList.add("show");
+      document.getElementById("dupcount").textContent=emails.length;
+      const list=emails.map(e=>{
+        const names=[...new Set(groups[e].map(g=>g.name))];
+        const rowNums=groups[e].map(g=>g.row+1).join(", ");
+        return '&bull; <b>'+esc(e)+'</b> - '+esc(names.join(" / "))+' (rows '+rowNums+')';
+      }).join("<br>");
+      document.getElementById("duplist").innerHTML=list;
+    } else dbar.classList.remove("show");
+  }
 
   /* table (paginated - only render a page of rows so large files stay responsive) */
   const wrap=document.getElementById("tblwrap");
@@ -1877,7 +2044,6 @@ document.getElementById("clearmarkup").addEventListener("click",()=>{
   recheckFromState();
   toast("Markup column cleared - enter "+(pct?pct+"%":"the global markup")+" in the JACK App");
 });
-
 /* how each column's rule maps to an Excel number format */
 function colNumFormat(rule){
   const t=(typeof rule==="string")?rule:(rule&&rule.t);
@@ -1886,38 +2052,95 @@ function colNumFormat(rule){
   if(t==="num") return "0";
   return null; /* not numeric -> keep as text */
 }
-document.getElementById("xlsx").addEventListener("click",()=>{
-  const tpl=TEMPLATES[STATE.tplKey];
-  const headers=STATE.headers;
-  /* work out, per column, whether it's numeric and its format */
-  const fmts=headers.map(h=>colNumFormat(tpl.cols[h]));
-  const aoa=[headers, ...STATE.rows];
+function buildSheet(rows, headers, tpl){
+  const fmts=headers.map(h=>colNumFormat((tpl&&tpl.cols||{})[h]));
+  const aoa=[headers, ...rows];
   const ws={};
-  const range={s:{r:0,c:0},e:{r:aoa.length-1,c:headers.length-1}};
+  const range={s:{r:0,c:0},e:{r:Math.max(0,aoa.length-1),c:Math.max(0,headers.length-1)}};
   aoa.forEach((row,r)=>{
-    row.forEach((val,c)=>{
+    (row||[]).forEach((val,c)=>{
       const addr=XLSX.utils.encode_cell({r,c});
       const raw=(val===undefined||val===null)?"":String(val);
-      if(r===0){ ws[addr]={t:"s",v:raw}; return; } /* header row is text */
+      if(r===0){ ws[addr]={t:"s",v:raw}; return; }
       const fmt=fmts[c];
       if(fmt!==null && raw.trim()!=="" && !isNaN(parseFloat(raw.replace(/[$,%\s]/g,"")))){
-        /* real number: store as number + apply the format so Excel shows 3.000 etc. */
         ws[addr]={t:"n",v:parseFloat(raw.replace(/[$,%\s]/g,"")),z:fmt};
       } else {
-        /* everything else stays text so Excel won't strip leading zeros or reparse dates/phones */
         ws[addr]={t:"s",v:raw};
       }
     });
   });
   ws["!ref"]=XLSX.utils.encode_range(range);
-  /* sensible column widths */
   ws["!cols"]=headers.map(h=>({wch:Math.max(10,Math.min(40,h.length+4))}));
+  return ws;
+}
+function downloadRows(rows, headers, tpl, filename, sheetName){
   const wb=XLSX.utils.book_new();
-  const sheetName=(STATE.tplKey||"import").slice(0,31);
-  XLSX.utils.book_append_sheet(wb,ws,sheetName);
+  XLSX.utils.book_append_sheet(wb,buildSheet(rows,headers,tpl),(sheetName||"import").slice(0,31));
+  XLSX.writeFile(wb, filename);
+}
+document.getElementById("xlsx").addEventListener("click",()=>{
+  const tpl=TEMPLATES[STATE.tplKey];
+  const headers=STATE.headers;
+  const isContact = tpl.contactRule || STATE.tplKey==="clients";
   const base = UPLOADED_NAME ? UPLOADED_NAME : (STATE.tplKey||"jack-import");
+
+  /* Estimates: single sheet as before */
+  if(!isContact){
+    downloadRows(STATE.rows, headers, tpl, base+"-formatted.xlsx", STATE.tplKey||"import");
+    toast("Excel file downloaded - numbers and text preserved");
+    return;
+  }
+
+  /* Contacts / Clients: one workbook with review tabs like your finished files */
+  const nameOnly=new Set(STATE.nameOnlyRows||[]);
+  const importRows = STATE.rows.filter((r,i)=>!nameOnly.has(i));
+  const nameOnlyRows = (STATE.nameOnlyRows||[]).map(i=>STATE.rows[i]);
+
+  /* duplicate emails: gather every row involved in a clash, with a "Duplicated_With" note */
+  const groups=STATE.dupGroups||{};
+  const dupHeaders=[...headers,"Duplicated_With"];
+  const dupRows=[];
+  Object.keys(groups).forEach(email=>{
+    const members=groups[email];
+    members.forEach(m=>{
+      const r=STATE.rows[m.row]; if(!r) return;
+      const others=members.filter(x=>x.row!==m.row).map(x=>x.name).join(", ");
+      dupRows.push([...r, others+" (shared "+email+")"]);
+    });
+  });
+
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, buildSheet(importRows, headers, tpl), "Import");
+  if(nameOnlyRows.length) XLSX.utils.book_append_sheet(wb, buildSheet(nameOnlyRows, headers, tpl), "Name Only");
+  if(dupRows.length)      XLSX.utils.book_append_sheet(wb, buildSheet(dupRows, dupHeaders, tpl), "Duplicated Emails");
+
+  /* Legend tab explaining the review lists + the highlight colours */
+  const legendAoa=[
+    ["JACK Import Formatter - review guide"],
+    [""],
+    ["Sheet","What it is"],
+    ["Import","Clean, ready-to-import contacts. Load this one into JACK."],
+    ["Name Only","Contacts with a name (and maybe an ABN) but no email or phone/mobile. Keep them here; they can be added to JACK later as blank records."],
+    ["Duplicated Emails","Contacts that share an email with another contact. JACK rejects duplicate emails, so reconcile or merge these before importing. The Duplicated_With column shows who each one clashes with."],
+    [""],
+    ["Highlight colours in the tool","Meaning"],
+    ["Yellow","Fixed automatically"],
+    ["Amber","Please review"],
+    ["Red","Blocking error (e.g. duplicate email, invalid ABN)"],
+    [""],
+    ["Note","Existing contacts (already in the client's JACK) are not split out - the tool has no way to know what is already there. Check those manually."]
+  ];
+  const legendWs=XLSX.utils.aoa_to_sheet(legendAoa);
+  legendWs["!cols"]=[{wch:22},{wch:90}];
+  XLSX.utils.book_append_sheet(wb, legendWs, "Legend");
+
   XLSX.writeFile(wb, base+"-formatted.xlsx");
-  toast("Excel file downloaded - numbers and text preserved");
+  const parts=["Import ("+importRows.length+")"];
+  if(nameOnlyRows.length) parts.push("Name Only ("+nameOnlyRows.length+")");
+  if(dupRows.length) parts.push("Duplicated Emails ("+dupRows.length+")");
+  parts.push("Legend");
+  toast("Downloaded workbook - tabs: "+parts.join(", "));
 });
 let WORKBOOK=null;
 function sheetToCleanTSV(ws){
@@ -1954,12 +2177,25 @@ document.getElementById("file").addEventListener("change",e=>{
       sel.innerHTML="";
       names.forEach(n=>{const o=document.createElement("option");o.value=n;o.textContent=n;sel.appendChild(o);});
       row.style.display=names.length>1?"block":"none";
-      /* pick the first sheet that looks like data (has a known header), else first sheet */
-      let pick=names[0];
-      for(const n of names){
-        const first=(sheetToCleanTSV(WORKBOOK.Sheets[n]).split("\n")[0])||"";
-        if(detectTemplate(first.split("\t"))){pick=n;break;}
+      /* choose the best sheet to load:
+         1) a sheet literally named "Original" (your raw Xero export lives there),
+         2) else a sheet whose first row looks like a Xero export (*ContactName / EmailAddress),
+         3) else the first sheet whose headers match a JACK template,
+         4) else the first sheet. */
+      let pick=null;
+      const firstRowOf = n => (sheetToCleanTSV(WORKBOOK.Sheets[n]).split("\n")[0]||"");
+      /* 1 - named Original */
+      pick = names.find(n=>n.trim().toLowerCase()==="original") || null;
+      /* 2 - looks like a Xero export */
+      if(!pick){
+        pick = names.find(n=>{ const h=firstRowOf(n).toLowerCase(); return h.includes("contactname") && h.includes("emailaddress"); }) || null;
       }
+      /* 3 - matches a JACK template */
+      if(!pick){
+        for(const n of names){ if(detectTemplate(firstRowOf(n).split("\t"))){ pick=n; break; } }
+      }
+      /* 4 - first non-empty sheet, else first */
+      if(!pick){ pick = names.find(n=>firstRowOf(n).trim()!=="") || names[0]; }
       sel.value=pick;
       loadSheet(pick);
       toast(names.length>1?'Loaded "'+pick+'" - change worksheet if needed, then Check and Format':'File loaded - hit Check and Format');
@@ -1975,7 +2211,7 @@ document.getElementById("sheet").addEventListener("change",e=>{ loadSheet(e.targ
 /* populate template dropdown - estimate, contractors and suppliers are live; the rest coming soon */
 (function(){
   const sel=document.getElementById("tpl");
-  const LIVE=["costings-estimate","contractors","suppliers"];
+  const LIVE=["costings-estimate","contractors","suppliers","clients"];
   for(const key in TEMPLATES){
     const o=document.createElement("option");
     if(LIVE.includes(key)){
