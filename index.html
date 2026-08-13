@@ -155,7 +155,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 74)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 79)</span></span>
   </div>
 </header>
 
@@ -260,7 +260,7 @@ const TEMPLATES = {
     name:"Job Schedules / Schedule Template",
     headers:["Item_Name","Phase","Start_Date","Duration","Start_Time","End_Time"],
     required:["Item_Name","Start_Date","Duration"],
-    cols:{Item_Name:"proper",Phase:"phase",Start_Date:"date-weekday",Duration:"workdays",Start_Time:"mustblank",End_Time:"mustblank"}
+    cols:{Item_Name:"schedulename",Phase:"phase",Start_Date:"date-weekday",Duration:"workdays",Start_Time:"mustblank",End_Time:"mustblank"}
   },
   "job-tasks": {
     name:"Job Tasks / Task Template",
@@ -617,11 +617,11 @@ function parseDate(raw){
     if(mm>12||dd>31||dd<1||mm<1) return {err:true};
     return {d:new Date(Date.UTC(yy,mm-1,dd)),note};
   }
-  /* 12 Jan 2026 / Jan 12, 2026 */
-  m=s.match(/^(\d{1,2})\s+([A-Za-z]{3,})\.?,?\s+(\d{4})$/);
-  if(m && MONTHS[m[2].slice(0,3).toLowerCase()]) return {d:new Date(Date.UTC(+m[3],MONTHS[m[2].slice(0,3).toLowerCase()]-1,+m[1])),note:"converted from written date"};
-  m=s.match(/^([A-Za-z]{3,})\.?,?\s+(\d{1,2}),?\s+(\d{4})$/);
-  if(m && MONTHS[m[1].slice(0,3).toLowerCase()]) return {d:new Date(Date.UTC(+m[3],MONTHS[m[1].slice(0,3).toLowerCase()]-1,+m[2])),note:"converted from written date"};
+  /* 12 Jan 2026 / 12 Jan 26 / Jan 12, 2026 */
+  m=s.match(/^(\d{1,2})\s+([A-Za-z]{3,})\.?,?\s+(\d{2,4})$/);
+  if(m && MONTHS[m[2].slice(0,3).toLowerCase()]){ let yy=+m[3]; if(yy<100) yy+=2000; return {d:new Date(Date.UTC(yy,MONTHS[m[2].slice(0,3).toLowerCase()]-1,+m[1])),note:"converted from written date"}; }
+  m=s.match(/^([A-Za-z]{3,})\.?,?\s+(\d{1,2}),?\s+(\d{2,4})$/);
+  if(m && MONTHS[m[1].slice(0,3).toLowerCase()]){ let yy=+m[3]; if(yy<100) yy+=2000; return {d:new Date(Date.UTC(yy,MONTHS[m[1].slice(0,3).toLowerCase()]-1,+m[2])),note:"converted from written date"}; }
   return {err:true};
 }
 function fmtDate(d){
@@ -814,6 +814,38 @@ function applyRule(rule,val,ctx){
       const out=fmtDate(d);
       if(out!==v && !p.note && !issues.some(i=>i.msg.includes("Monday"))) issues.push({level:"fixed",msg:"reformatted to dd/mm/yyyy"});
       v=out;
+      break;
+    }
+    case "schedulename": {
+      /* Schedule task names: Title Case, but keep trade set-phrases, schedule acronyms,
+         and minor words lowercase mid-name. Fix common source typos and flag them. */
+      if(!v) break;
+      let s=v.replace(/_+/g," ").replace(/\s+/g," ").trim();
+      /* fix common schedule typos (flag, never silent) */
+      const TYPOS={"terimte":"Termite","wal":"Wall","skiritng":"Skirting","slab preperation":"Slab Preparation","electrican":"Electrician","preperation":"Preparation","concreate":"Concrete"};
+      let typoFixed=false;
+      Object.keys(TYPOS).forEach(bad=>{
+        const re=new RegExp("\\b"+bad.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","ig");
+        if(re.test(s)){ s=s.replace(re,TYPOS[bad]); typoFixed=true; }
+      });
+      /* Title Case with minor words lowercased mid-name */
+      const MINOR=new Set(["and","or","of","to","the","a","an","on","for","with","in","at","by"]);
+      const SCHED_ACR=new Set(["AC","QA","RIM","GF","FF","UG","NBN","LVL","PC","PS","QLD","NSW","VIC"]);
+      const words=s.split(" ");
+      s=words.map((w,i)=>{
+        const bare=w.replace(/[^A-Za-z0-9/]/g,"");
+        const up=bare.toUpperCase();
+        if(SCHED_ACR.has(up)) return w.toUpperCase();
+        if(/^a\/c$/i.test(w)) return "A/C";
+        if(i>0 && MINOR.has(bare.toLowerCase())) return w.toLowerCase();
+        return w.split("/").map(part=>part?part.charAt(0).toUpperCase()+part.slice(1).toLowerCase():part).join("/");
+      }).join(" ");
+      /* preserve known trade set-phrases with exact casing */
+      const PHRASES=[["rough in","Rough In"],["fit off","Fit Off"],["fix out","Fix Out"],["lock up","Lock Up"],["set out","Set Out"],["off cut","Off Cut"],["walk through","Walk Through"],["sand and cement","Sand and Cement"]];
+      PHRASES.forEach(([bad,good])=>{ s=s.replace(new RegExp("\\b"+bad+"\\b","ig"),good); });
+      if(typoFixed) issues.push({level:"review",msg:'spelling fixed in "'+v+'" -> "'+s+'" (please verify)'});
+      else if(s!==v) issues.push({level:"fixed",msg:"task name cased"});
+      v=s;
       break;
     }
     case "workdays": {
@@ -1245,6 +1277,81 @@ function splitCSV(line){
   }
   out.push(cur); return out;
 }
+function reshapeRawSchedule(rows){
+  /* Turn a raw Gantt export into the JACK schedule columns.
+     Handles: a title block above the header row, a "Stage/Task/Date" grouped layout,
+     and a "Task/Start Date/Duration" layout with a wide calendar grid to drop.
+     Returns a new rows array (header + data) or null if it doesn't look like a raw schedule. */
+  if(!rows||rows.length<2) return null;
+  const norm=s=>String(s==null?"":s).toLowerCase().replace(/[^a-z0-9]/g,"");
+  /* find the header row: within the first 15 rows, a row that has a task-like column
+     AND a date/duration/stage column */
+  const TASK=["task","taskdescription","taskname","activity","item","itemname","description","process","step","milestone"];
+  const DATE=["startdate","start","dateforworks","dateforwork","commence","begindate","date"];
+  const DUR =["duration","dur","workdays","noofdays","durationdays"];
+  const STAGE=["stage","phase","group","section"];
+  let hdrRow=-1, map=null;
+  for(let r=0;r<Math.min(15,rows.length);r++){
+    const cells=rows[r].map(norm);
+    const findCol=list=>cells.findIndex(c=>list.includes(c));
+    let tI=findCol(TASK);
+    const dI=findCol(DATE), duI=findCol(DUR), sI=findCol(STAGE);
+    /* need at least one schedule-ish column to treat this as the header row */
+    if(dI<0 && duI<0 && sI<0) continue;
+    if(tI<0){
+      /* task column has a blank/unlabelled header - pick the text-heaviest column in the
+         rows below that isn't one of the recognised numeric/date columns */
+      const taken=new Set([dI,duI,sI].filter(x=>x>=0));
+      const ncol=Math.max(...rows.slice(r+1,r+12).map(rr=>rr.length),0);
+      let bestCol=-1,bestScore=-1;
+      for(let c=0;c<ncol;c++){
+        if(taken.has(c)) continue;
+        let textCells=0;
+        for(let k=r+1;k<Math.min(rows.length,r+15);k++){
+          const val=String((rows[k]||[])[c]==null?"":rows[k][c]).trim();
+          if(val && /[a-z]{3,}/i.test(val) && !/^\d/.test(val)) textCells++;
+        }
+        if(textCells>bestScore){ bestScore=textCells; bestCol=c; }
+      }
+      if(bestScore>=3) tI=bestCol;
+    }
+    if(tI<0) continue;
+    hdrRow=r; map={task:tI,date:dI,dur:duI,stage:sI};
+    break;
+  }
+  if(hdrRow<0) return null;
+  /* only reshape if this ISN'T already the JACK layout (which parseInput handles fine) */
+  const hdrNorm=rows[hdrRow].map(norm);
+  if(hdrNorm.includes("itemname") && hdrNorm.includes("startdate")) return null;
+
+  const out=[["Item_Name","Phase","Start_Date","Duration","Start_Time","End_Time"]];
+  let lastStage="";
+  /* if there's no Stage column, a task row with a very long duration that is followed by
+     shorter tasks is likely a group/phase header (e.g. "Unassigned ... 95 days"). Collect
+     durations to spot these. */
+  const durNum=v=>{ const n=parseFloat(String(v==null?"":v).replace(/[^\d.]/g,"")); return isNaN(n)?0:n; };
+  for(let r=hdrRow+1;r<rows.length;r++){
+    const row=rows[r];
+    const cell=i=>(i>=0 && row[i]!=null)?String(row[i]).trim():"";
+    const task=cell(map.task);
+    const stage=cell(map.stage);
+    /* stage-grouped: a row with only a Stage and no Task is a group header - remember it, skip */
+    if(map.stage>=0 && stage && !task){ lastStage=stage; continue; }
+    if(map.stage>=0 && stage) lastStage=stage;
+    if(!task) continue; /* skip fully blank / separator rows */
+    /* no Stage column: a long-duration row acts as a group header for what follows */
+    if(map.stage<0 && map.dur>=0){
+      const thisDur=durNum(cell(map.dur));
+      /* look ahead: if the next task's duration is much smaller, this is a group header */
+      let nextDur=0;
+      for(let k=r+1;k<rows.length;k++){ const t=(row2=>row2 && map.task>=0 ? String(row2[map.task]||"").trim():"")(rows[k]); if(t){ nextDur=durNum(String((rows[k][map.dur]||""))); break; } }
+      if(thisDur>=15 && nextDur>0 && thisDur>=nextDur*3){ lastStage=task; continue; }
+    }
+    const phase = (map.stage>=0 ? (stage||lastStage) : lastStage) || "";
+    out.push([task, phase, cell(map.date), cell(map.dur), "", ""]);
+  }
+  return out.length>1 ? out : null;
+}
 function detectTemplate(headers){
   let best=null,bestScore=0;
   for(const key in TEMPLATES){
@@ -1315,7 +1422,10 @@ let IS_RECHECK=false;    /* true when runCheck is triggered by an in-app action,
 /* common header variations -> canonical JACK header */
 const HEADER_ALIASES={
   "Item":["items","description","itemdescription","lineitem","costitem"],
-  "Item_Name":["itemname","itemnames","task","scheduleitem"],
+  "Item_Name":["itemname","itemnames","task","taskname","taskdescription","scheduleitem","activity","description"],
+  "Start_Date":["startdate","start","datestart","dateforworks","dateforwork","begindate","commencementdate","commence"],
+  "Duration":["duration","days","workdays","durationdays","dur","workingdays","noofdays"],
+  "Phase":["phase","phases","stage","group","section","category"],
   "Cost_Category":["category","costcategory","categorydescription","categorydesc","costcat"],
   "Cost_Group":["group","costgroup"],
   "Price_Each":["estimatedunitcost","priceeach","unitprice","rate","priceperunit","unitcost","price","costeach","unitrate","costperunit","unitcostexgst","priceexgst"],
@@ -1325,11 +1435,8 @@ const HEADER_ALIASES={
   "Type":["type","costtype"],
   "Specification":["spec","specification","specs","notes"],
   "Markup":["markup","margin","markuppercent"],
-  "Task_Name":["taskname","task","tasktitle"],
+  "Task_Name":["taskname","tasktitle"],
   "Due_Date":["duedate","deadline"],
-  "Start_Date":["startdate","start","datestart"],
-  "Duration":["duration","days","workdays","durationdays"],
-  "Phase":["phase","phases","stage"],
   "Trading_Name":["tradingname","businessname","companyname","name"],
   "Mobile":["mobile","mobilenumber","mobileno","cell"],
   "Phone":["phone","phonenumber","phoneno","telephone","tel"],
@@ -1368,6 +1475,16 @@ function runCheck(){
   if(!parsed||parsed.length<1){ showBlockingError("Nothing to check - paste your data first, or open a file (headers must be in the first row)."); return; }
 
   let tplKey=document.getElementById("tpl").value;
+
+  /* ===== Raw schedule/Gantt? reshape it into the JACK schedule columns ===== */
+  if(tplKey==="job-schedules" || tplKey==="auto"){
+    const reshaped=reshapeRawSchedule(parsed);
+    if(reshaped){
+      parsed.length=0; reshaped.forEach(r=>parsed.push(r));
+      if(tplKey==="auto") tplKey="job-schedules";
+    }
+  }
+
   let headers=parsed[0].map(h=>String(h).trim());
 
   /* ===== Xero contact export? transform it to the JACK contact layout ===== */
@@ -1526,6 +1643,10 @@ function runCheck(){
         if(tpl.estimate && h==="Item"){
           /* blank Item is kept and flagged for review in the bar above - soft note, not a blocking error */
           issues.push({row:rowIdx,col:ci,level:"review",msg:h+" (row "+(rowIdx+1)+"): no Item name - review whether this row is needed"});
+          if(worst!=="error") worst="review";
+        } else if(tplKey==="job-schedules" && (h==="Start_Date"||h==="Duration")){
+          /* a schedule task may not have its date/duration set yet - flag for review, don't block */
+          issues.push({row:rowIdx,col:ci,level:"review",msg:h+" (row "+(rowIdx+1)+"): not set yet - add before importing to JACK"});
           if(worst!=="error") worst="review";
         } else {
           issues.push({row:rowIdx,col:ci,level:"error",msg:h+" (row "+(rowIdx+1)+"): required field is blank"});
@@ -1758,6 +1879,21 @@ function runCheck(){
         }
       });
       if(zeroed>0) issues.push({row:-1,col:-1,level:"fixed",msg:"Set all Markup values to 0.00 - the customer enters markup globally in the JACK App"});
+    }
+  }
+
+  /* Schedules: stage-grouped source lists the Stage once, then leaves it blank on the
+     tasks below it. Carry the Phase down so each task keeps its stage name. */
+  if(tplKey==="job-schedules"){
+    const pI=headers.indexOf("Phase");
+    if(pI>=0){
+      let last="", filled=0;
+      rows.forEach((r,ri)=>{
+        const cur=String(r[pI]||"").trim();
+        if(cur) last=cur;
+        else if(last){ r[pI]=last; cellFlags[ri+"_"+pI]="fixed"; filled++; }
+      });
+      if(filled>0) issues.push({row:-1,col:-1,level:"fixed",msg:"Filled "+filled+" blank Phase cell(s) down from the stage above"});
     }
   }
 
@@ -2237,23 +2373,35 @@ document.getElementById("file").addEventListener("change",e=>{
       names.forEach(n=>{const o=document.createElement("option");o.value=n;o.textContent=n;sel.appendChild(o);});
       row.style.display=names.length>1?"block":"none";
       /* choose the best sheet to load:
-         1) a sheet literally named "Original" (your raw Xero export lives there),
-         2) else a sheet whose first row looks like a Xero export (*ContactName / EmailAddress),
-         3) else the first sheet whose headers match a JACK template,
-         4) else the first sheet. */
+         1) if a template is picked, a sheet whose headers match THAT template's columns,
+         2) else a sheet named "Original" (raw Xero export),
+         3) else a sheet that looks like a Xero export (*ContactName / EmailAddress),
+         4) else the first sheet whose headers match any JACK template,
+         5) else the first non-empty sheet. */
       let pick=null;
       const firstRowOf = n => (sheetToCleanTSV(WORKBOOK.Sheets[n]).split("\n")[0]||"");
-      /* 1 - named Original */
-      pick = names.find(n=>n.trim().toLowerCase()==="original") || null;
-      /* 2 - looks like a Xero export */
+      const chosen=document.getElementById("tpl").value;
+      /* 1 - headers match the currently-selected template (best for schedules/estimates
+         whose workbooks keep the clean data on a "Formatting"/"JACK IMPORT" tab, not "Original") */
+      if(chosen && chosen!=="auto" && TEMPLATES[chosen]){
+        const want=TEMPLATES[chosen].headers.map(h=>h.toLowerCase());
+        pick = names.find(n=>{
+          const got=firstRowOf(n).toLowerCase().split("\t").map(s=>s.trim());
+          const hits=want.filter(w=>got.includes(w)).length;
+          return hits>=Math.min(3,want.length); /* most template headers present */
+        }) || null;
+      }
+      /* 2 - named Original */
+      if(!pick) pick = names.find(n=>n.trim().toLowerCase()==="original") || null;
+      /* 3 - looks like a Xero export */
       if(!pick){
         pick = names.find(n=>{ const h=firstRowOf(n).toLowerCase(); return h.includes("contactname") && h.includes("emailaddress"); }) || null;
       }
-      /* 3 - matches a JACK template */
+      /* 4 - matches any JACK template */
       if(!pick){
         for(const n of names){ if(detectTemplate(firstRowOf(n).split("\t"))){ pick=n; break; } }
       }
-      /* 4 - first non-empty sheet, else first */
+      /* 5 - first non-empty sheet, else first */
       if(!pick){ pick = names.find(n=>firstRowOf(n).trim()!=="") || names[0]; }
       sel.value=pick;
       loadSheet(pick);
@@ -2270,7 +2418,7 @@ document.getElementById("sheet").addEventListener("change",e=>{ loadSheet(e.targ
 /* populate template dropdown - estimate, contractors and suppliers are live; the rest coming soon */
 (function(){
   const sel=document.getElementById("tpl");
-  const LIVE=["costings-estimate","contractors","suppliers","clients"];
+  const LIVE=["costings-estimate","job-schedules","contractors","suppliers","clients"];
   for(const key in TEMPLATES){
     const o=document.createElement("option");
     if(LIVE.includes(key)){
