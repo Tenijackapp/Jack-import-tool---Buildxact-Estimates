@@ -8,6 +8,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>if(window.pdfjsLib){pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";}</script>
 <style>
 :root{
   /* JACK brand palette (Brand Guidelines 1.0) */
@@ -155,7 +157,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 79)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 82)</span></span>
   </div>
 </header>
 
@@ -184,9 +186,9 @@ Site establishment	Preliminaries	05/01/2026	2
 Slab pour		10/01/2026	1"></textarea>
       <div style="margin-top:8px">
         <label for="file">Or open an Excel / CSV file</label>
-        <input type="file" id="file" accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt">
+        <input type="file" id="file" accept=".xlsx,.xlsm,.xls,.csv,.tsv,.txt,.pdf">
         <div id="sheetrow" style="display:none;margin-top:6px">
-          <label for="sheet">Worksheet (defaults to "Original" - change to format a different sheet)</label>
+          <label for="sheet">Worksheet to format (pick any tab from your file)</label>
           <select id="sheet"></select>
         </div>
       </div>
@@ -646,18 +648,16 @@ function fmtPhone(raw){
   /* restore leading zero on mobiles/landlines that lost it */
   if(digits.length===9&&digits[0]==="4") digits="0"+digits;         /* 4XXXXXXXX -> 04XXXXXXXX */
   else if(digits.length===9&&/^[2378]/.test(digits)) digits="0"+digits; /* area+8 without 0 */
-  /* formats per spec */
+  /* formats per spec - each requires an EXACT digit count */
   if(/^04\d{8}$/.test(digits)) return {v:digits.replace(/(\d{4})(\d{3})(\d{3})/,"$1 $2 $3"),note:"standardised mobile"};
   if(/^1300\d{6}$/.test(digits)) return {v:digits.replace(/(1300)(\d{3})(\d{3})/,"$1 $2 $3"),note:"standardised 1300"};
   if(/^1800\d{6}$/.test(digits)) return {v:digits.replace(/(1800)(\d{3})(\d{3})/,"$1 $2 $3"),note:"standardised 1800"};
   if(/^13\d{4}$/.test(digits)) return {v:digits.replace(/(13)(\d{2})(\d{2})/,"$1 $2 $3"),note:"standardised 13"};
   if(/^0[2378]\d{8}$/.test(digits)) return {v:digits.slice(0,2)+" "+digits.slice(2,6)+" "+digits.slice(6),note:"standardised landline"};
-  /* short landline: area code + only 7 digits (needs 8) - one digit missing.
-     Keep the value but flag it; don't guess the missing digit. */
-  if(/^0[2378]\d{7}$/.test(digits)) return {v:s.replace(/\s+/g," ").trim(),warn:'phone "'+s+'" looks one digit short for a landline - please check and fix'};
-  /* bare 8-digit landline with no area code - can't reformat reliably, blank + flag */
-  if(/^\d{8}$/.test(digits)) return {v:"",warn:'phone "'+s+'" has no area code - blanked, enter manually'};
-  return {v:s,warn:'phone "'+s+'" does not match an Australian format - please review'};
+  /* VALIDATION GATE: the stripped number does not match any valid AU pattern by digit count
+     (e.g. "08 967254180" = 11 digits, one too many for a landline). Keep the value EXACTLY
+     as the person typed it, do not guess, do not blank - flag orange for manual review. */
+  return {v:s.replace(/\s+/g," ").trim(),warn:'phone "'+s+'" doesn\'t match a valid Australian format ('+digits.length+' digits) - please check and fix by hand'};
 }
 
 function fmtNumber(raw,dp){
@@ -1277,6 +1277,58 @@ function splitCSV(line){
   }
   out.push(cur); return out;
 }
+async function readScheduleFromPDF(arrayBuffer){
+  /* Read a text-based schedule PDF (e.g. a Gantt export with a Title/Start/Workdays table
+     on the left). Groups words into rows by their y-position, keeps the left-hand table
+     (drops the calendar grid on the right), and splits each row into Item_Name / Start_Date
+     / Duration by locating the date token. Returns TSV text, or null if nothing usable. */
+  if(!window.pdfjsLib) throw new Error("PDF reader not loaded");
+  const pdf=await pdfjsLib.getDocument({data:arrayBuffer}).promise;
+  const MONTHS="jan feb mar apr may jun jul aug sep oct nov dec";
+  const allRows=[];
+  for(let p=1;p<=pdf.numPages;p++){
+    const page=await pdf.getPage(p);
+    const content=await page.getTextContent();
+    const vw=page.getViewport({scale:1});
+    /* find the calendar-grid start: the "Title/Start/Workdays" header tells us the table's
+       right edge. Default: keep words in the left ~30% if we can't find it. */
+    let gridX=vw.width*0.32;
+    const items=content.items.map(it=>({str:it.str,x:it.transform[4],y:Math.round(it.transform[5])}));
+    /* locate "Workdays" (or "Duration") header to set the right edge of the useful table */
+    const wd=items.find(it=>/^(workdays|duration|days)$/i.test(it.str.trim()));
+    if(wd) gridX=wd.x+120;
+    /* group into rows by y (within 4px) */
+    const byRow={};
+    items.forEach(it=>{
+      if(!it.str.trim()) return;
+      if(it.x>gridX) return; /* drop calendar grid / bar labels on the right */
+      const key=Math.round(it.y/4)*4;
+      (byRow[key]=byRow[key]||[]).push(it);
+    });
+    Object.keys(byRow).map(Number).sort((a,b)=>b-a).forEach(k=>{
+      const line=byRow[k].sort((a,b)=>a.x-b.x).map(w=>w.str).join(" ").replace(/\s+/g," ").trim();
+      if(line) allRows.push(line);
+    });
+  }
+  /* now parse each line: [Title...] [Month D, YYYY] [N day(s)] */
+  const dateRe=new RegExp("\\b("+MONTHS.split(" ").join("|")+")[a-z]*\\.?\\s+\\d{1,2},?\\s+\\d{2,4}\\b","i");
+  const durRe=/\b(\d+(?:\.\d+)?)\s*(day|days|wk|week|weeks)\b/i;
+  const out=[["Item_Name","Phase","Start_Date","Duration","Start_Time","End_Time"]];
+  let started=false;
+  allRows.forEach(line=>{
+    /* skip until we pass the header row */
+    if(/\btitle\b/i.test(line) && /\bstart\b/i.test(line)){ started=true; return; }
+    const dm=line.match(dateRe);
+    if(!dm){ return; } /* only rows with a real date are tasks */
+    const title=line.slice(0,dm.index).trim().replace(/[\u2026]+$/,"").trim(); /* strip trailing ellipsis */
+    let rest=line.slice(dm.index+dm[0].length).trim();
+    let dur="";
+    const durm=rest.match(durRe);
+    if(durm){ let n=parseFloat(durm[1]); if(/wk|week/i.test(durm[2])) n=n*5; dur=String(Math.round(n)); }
+    if(title) out.push([title, "", dm[0], dur, "", ""]);
+  });
+  return out.length>1 ? out.map(r=>r.join("\t")).join("\n") : null;
+}
 function reshapeRawSchedule(rows){
   /* Turn a raw Gantt export into the JACK schedule columns.
      Handles: a title block above the header row, a "Stage/Task/Date" grouped layout,
@@ -1326,10 +1378,25 @@ function reshapeRawSchedule(rows){
 
   const out=[["Item_Name","Phase","Start_Date","Duration","Start_Time","End_Time"]];
   let lastStage="";
-  /* if there's no Stage column, a task row with a very long duration that is followed by
-     shorter tasks is likely a group/phase header (e.g. "Unassigned ... 95 days"). Collect
-     durations to spot these. */
   const durNum=v=>{ const n=parseFloat(String(v==null?"":v).replace(/[^\d.]/g,"")); return isNaN(n)?0:n; };
+  /* find a row-number column: a column (other than the task col) whose data cells are a
+     simple integer sequence (1,2,3...). If present, a row that has task text but NO number
+     in this column is a section/phase heading, not a real task (e.g. "Pre-Construction Process"). */
+  let numCol=-1;
+  {
+    const ncol=Math.max(...rows.slice(hdrRow+1).map(rr=>rr.length),0);
+    for(let c=0;c<ncol;c++){
+      if(c===map.task) continue;
+      let seq=0,seen=0;
+      for(let k=hdrRow+1;k<rows.length;k++){
+        const val=String((rows[k]||[])[c]==null?"":rows[k][c]).trim();
+        if(val==="") continue;
+        seen++;
+        if(/^\d{1,3}$/.test(val)){ seq++; }
+      }
+      if(seen>=3 && seq>=seen*0.8){ numCol=c; break; }
+    }
+  }
   for(let r=hdrRow+1;r<rows.length;r++){
     const row=rows[r];
     const cell=i=>(i>=0 && row[i]!=null)?String(row[i]).trim():"";
@@ -1339,10 +1406,14 @@ function reshapeRawSchedule(rows){
     if(map.stage>=0 && stage && !task){ lastStage=stage; continue; }
     if(map.stage>=0 && stage) lastStage=stage;
     if(!task) continue; /* skip fully blank / separator rows */
+    /* phase heading: task text present but no row-number and no date/duration -> it's a
+       section title (like "Pre-Construction Process"), use it as the Phase, not a task */
+    if(numCol>=0 && !cell(numCol) && !cell(map.date) && !durNum(cell(map.dur))){
+      lastStage=task; continue;
+    }
     /* no Stage column: a long-duration row acts as a group header for what follows */
     if(map.stage<0 && map.dur>=0){
       const thisDur=durNum(cell(map.dur));
-      /* look ahead: if the next task's duration is much smaller, this is a group header */
       let nextDur=0;
       for(let k=r+1;k<rows.length;k++){ const t=(row2=>row2 && map.task>=0 ? String(row2[map.task]||"").trim():"")(rows[k]); if(t){ nextDur=durNum(String((rows[k][map.dur]||""))); break; } }
       if(thisDur>=15 && nextDur>0 && thisDur>=nextDur*3){ lastStage=task; continue; }
@@ -1694,6 +1765,11 @@ function runCheck(){
       }
       if(c1mI>=0 && !outRow[c1mI] && bPhoneI>=0 && outRow[bPhoneI]){
         outRow[c1mI]=outRow[bPhoneI]; cellFlags[rowIdx+"_"+c1mI]="fixed";
+      }
+      /* reverse: if the business Phone is blank but Contact1_Mobile has a number,
+         copy it up into Phone so the record still has a contact number. */
+      if(bPhoneI>=0 && !outRow[bPhoneI] && c1mI>=0 && outRow[c1mI]){
+        outRow[bPhoneI]=outRow[c1mI]; cellFlags[rowIdx+"_"+bPhoneI]="fixed";
       }
       [["Contact1_First_Name","Contact1_Last_Name","Contact1_Email","Contact1_Mobile"],
        ["Contact2_First_Name","Contact2_Last_Name","Contact2_Email","Contact2_Mobile"]].forEach(([fn,ln,em,mo])=>{
@@ -2358,7 +2434,30 @@ document.getElementById("file").addEventListener("change",e=>{
   const f=e.target.files[0]; if(!f) return;
   UPLOADED_NAME = f.name.replace(/\.[^.]+$/,""); /* remember base name (no extension) for export */
   const isExcel=/\.(xlsx|xlsm|xls)$/i.test(f.name);
+  const isPDF=/\.pdf$/i.test(f.name);
   const rd=new FileReader();
+  if(isPDF){
+    /* switch to the schedule template automatically - PDFs we read are schedules */
+    const tplSel=document.getElementById("tpl");
+    if(tplSel && TEMPLATES["job-schedules"]) tplSel.value="job-schedules";
+    document.getElementById("sheetrow").style.display="none";
+    toast("Reading PDF...");
+    rd.onload=async ()=>{
+      try{
+        const tsv=await readScheduleFromPDF(rd.result);
+        if(!tsv){
+          showBlockingError("Couldn't find a schedule table in that PDF. If it's a scanned image (not selectable text), it needs to be converted first - send it over and it can be turned into an Excel for you.");
+          return;
+        }
+        document.getElementById("src").value=tsv;
+        toast("PDF read - review the table, then Check and Format");
+      }catch(err){
+        showBlockingError("That PDF couldn't be read in the browser. If it's a scanned image, it needs converting to Excel first.");
+      }
+    };
+    rd.readAsArrayBuffer(f);
+    return;
+  }
   if(isExcel){
     rd.onload=()=>{
       try{
@@ -2413,7 +2512,12 @@ document.getElementById("file").addEventListener("change",e=>{
     rd.readAsText(f);
   }
 });
-document.getElementById("sheet").addEventListener("change",e=>{ loadSheet(e.target.value); toast('Loaded "'+e.target.value+'"'); });
+document.getElementById("sheet").addEventListener("change",e=>{
+  loadSheet(e.target.value);
+  toast('Loaded "'+e.target.value+'" worksheet');
+  /* if the user has already run a check, re-run it on the newly chosen tab automatically */
+  if(STATE&&STATE.rows&&STATE.rows.length){ runCheck(); }
+});
 
 /* populate template dropdown - estimate, contractors and suppliers are live; the rest coming soon */
 (function(){
