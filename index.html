@@ -157,7 +157,7 @@ kbd{font-family:var(--mono);background:#EDEEEA;border-radius:4px;padding:1px 5px
     <div class="h-row">
       <h1>Import Formatter</h1>
     </div>
-    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 82)</span></span>
+    <span class="h-sub">Formats <b>Buildxact exports</b> for import into the JACK App. Supports Costings / Estimate, Contractors, and Suppliers. <span style="opacity:.7">(build 87)</span></span>
   </div>
 </header>
 
@@ -459,8 +459,12 @@ function properCaseName(s){
     const up=bare.toUpperCase();
     /* keep known acronyms/brands uppercase */
     if(KEEP_UP.has(up)) return w.toUpperCase();
-    /* keep short (<=4) all-caps, vowel-less consonant tokens uppercase (SR, HNP, JSH) */
+    /* keep short (<=4) all-caps consonant-only tokens uppercase (SR, HNP, JSH) */
     if(bare.length<=4 && bare===up && !/[AEIOU]/.test(up) && /^[A-Z]+$/.test(up)) return w.toUpperCase();
+    /* keep short (2-5) all-caps tokens uppercase even with vowels (AMR, AAMI, ASA, ABI, RACV)
+       - in a business name a short all-caps token is almost always an acronym/brand. The
+       source wrote it in caps on purpose, so preserve it. */
+    if(bare.length>=2 && bare.length<=5 && bare===up && /^[A-Z]+$/.test(up)) return w.toUpperCase();
     /* preserve deliberate mixed-case (EnergyAustralia, JB Hi-Fi, OneSource) - has a lowercase
        followed by an uppercase inside the token */
     if(/[a-z][A-Z]/.test(bare)) return w;
@@ -765,15 +769,25 @@ function applyRule(rule,val,ctx){
       break;
     }
     case "type-contact": {
-      /* Force Type to match the picked template: Suppliers -> "Supplier",
-         Contractors -> "Contractor". Whatever is in the input is overridden. */
+      /* Set the contact Type. If the source has a Category/Type value, honour it
+         (Subcontractor -> Contractor, Supplier -> Supplier); otherwise use the template default. */
       const forced=r.def;
-      if(!v){ v=forced; issues.push({level:"fixed",msg:'Type set to "'+forced+'"'}); break; }
-      const cleaned=v.replace(/\s+/g," ").trim();
-      if(cleaned.toLowerCase()!==forced.toLowerCase()){
-        issues.push({level:"fixed",msg:'Type changed from "'+cleaned+'" to "'+forced+'" to match the selected template'});
+      const cleaned=String(v||"").replace(/\s+/g," ").trim();
+      const low=cleaned.toLowerCase();
+      let mapped=null;
+      if(/sub-?contractor|subbie|trade/.test(low)) mapped="Contractor";
+      else if(/^contractor$/.test(low)) mapped="Contractor";
+      else if(/supplier|vendor|merchant/.test(low)) mapped="Supplier";
+      else if(/client|customer/.test(low)) mapped="Client";
+      if(!cleaned){ v=forced; issues.push({level:"fixed",msg:'Type set to "'+forced+'"'}); break; }
+      if(mapped){
+        if(mapped!==cleaned) issues.push({level:"fixed",msg:'Type "'+cleaned+'" read as "'+mapped+'"'});
+        v=mapped;
+      } else {
+        /* unrecognised category - fall back to the template default */
+        issues.push({level:"fixed",msg:'Type "'+cleaned+'" not recognised - set to "'+forced+'"'});
+        v=forced;
       }
-      v=forced;
       break;
     }
     case "sentence": {
@@ -830,7 +844,7 @@ function applyRule(rule,val,ctx){
       });
       /* Title Case with minor words lowercased mid-name */
       const MINOR=new Set(["and","or","of","to","the","a","an","on","for","with","in","at","by"]);
-      const SCHED_ACR=new Set(["AC","QA","RIM","GF","FF","UG","NBN","LVL","PC","PS","QLD","NSW","VIC"]);
+      const SCHED_ACR=new Set(["AC","QA","RIM","GF","FF","UG","NBN","LVL","PC","PS","QLD","NSW","VIC","OSD","PVC","UPVC","HWS","HWU","NCC","BAL","EWP","SWMS","WHS","MPa","DPC","FRL","RCP","PFC","SHS","RHS","AAC"]);
       const words=s.split(" ");
       s=words.map((w,i)=>{
         const bare=w.replace(/[^A-Za-z0-9/]/g,"");
@@ -1340,6 +1354,7 @@ function reshapeRawSchedule(rows){
      AND a date/duration/stage column */
   const TASK=["task","taskdescription","taskname","activity","item","itemname","description","process","step","milestone"];
   const DATE=["startdate","start","dateforworks","dateforwork","commence","begindate","date"];
+  const ENDD=["enddate","end","finish","finishdate","datedue","completion"];
   const DUR =["duration","dur","workdays","noofdays","durationdays"];
   const STAGE=["stage","phase","group","section"];
   let hdrRow=-1, map=null;
@@ -1347,13 +1362,13 @@ function reshapeRawSchedule(rows){
     const cells=rows[r].map(norm);
     const findCol=list=>cells.findIndex(c=>list.includes(c));
     let tI=findCol(TASK);
-    const dI=findCol(DATE), duI=findCol(DUR), sI=findCol(STAGE);
+    const dI=findCol(DATE), duI=findCol(DUR), sI=findCol(STAGE), eI=findCol(ENDD);
     /* need at least one schedule-ish column to treat this as the header row */
     if(dI<0 && duI<0 && sI<0) continue;
     if(tI<0){
       /* task column has a blank/unlabelled header - pick the text-heaviest column in the
          rows below that isn't one of the recognised numeric/date columns */
-      const taken=new Set([dI,duI,sI].filter(x=>x>=0));
+      const taken=new Set([dI,duI,sI,eI].filter(x=>x>=0));
       const ncol=Math.max(...rows.slice(r+1,r+12).map(rr=>rr.length),0);
       let bestCol=-1,bestScore=-1;
       for(let c=0;c<ncol;c++){
@@ -1368,7 +1383,7 @@ function reshapeRawSchedule(rows){
       if(bestScore>=3) tI=bestCol;
     }
     if(tI<0) continue;
-    hdrRow=r; map={task:tI,date:dI,dur:duI,stage:sI};
+    hdrRow=r; map={task:tI,date:dI,dur:duI,stage:sI,end:eI};
     break;
   }
   if(hdrRow<0) return null;
@@ -1397,30 +1412,60 @@ function reshapeRawSchedule(rows){
       if(seen>=3 && seq>=seen*0.8){ numCol=c; break; }
     }
   }
+  /* parse a date cell to a comparable number (for parent-span detection) */
+  const toDate=v=>{ const s=String(v==null?"":v).trim(); if(!s) return null;
+    let m=s.match(/^(\d{1,2})\s+([A-Za-z]{3,})\.?\s+(\d{2,4})$/);
+    const MO={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11};
+    if(m && MO[m[2].slice(0,3).toLowerCase()]!==undefined){ let y=+m[3]; if(y<100)y+=2000; return Date.UTC(y,MO[m[2].slice(0,3).toLowerCase()],+m[1]); }
+    m=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+    if(m){ let y=+m[3]; if(y<100)y+=2000; return Date.UTC(y,+m[2]-1,+m[1]); }
+    const d=new Date(s); return isNaN(d)?null:d.getTime();
+  };
+  /* collect the raw task rows first (task + start + end + dur) */
+  const raw=[];
   for(let r=hdrRow+1;r<rows.length;r++){
     const row=rows[r];
     const cell=i=>(i>=0 && row[i]!=null)?String(row[i]).trim():"";
-    const task=cell(map.task);
-    const stage=cell(map.stage);
-    /* stage-grouped: a row with only a Stage and no Task is a group header - remember it, skip */
-    if(map.stage>=0 && stage && !task){ lastStage=stage; continue; }
-    if(map.stage>=0 && stage) lastStage=stage;
-    if(!task) continue; /* skip fully blank / separator rows */
-    /* phase heading: task text present but no row-number and no date/duration -> it's a
-       section title (like "Pre-Construction Process"), use it as the Phase, not a task */
-    if(numCol>=0 && !cell(numCol) && !cell(map.date) && !durNum(cell(map.dur))){
-      lastStage=task; continue;
-    }
-    /* no Stage column: a long-duration row acts as a group header for what follows */
-    if(map.stage<0 && map.dur>=0){
-      const thisDur=durNum(cell(map.dur));
-      let nextDur=0;
-      for(let k=r+1;k<rows.length;k++){ const t=(row2=>row2 && map.task>=0 ? String(row2[map.task]||"").trim():"")(rows[k]); if(t){ nextDur=durNum(String((rows[k][map.dur]||""))); break; } }
-      if(thisDur>=15 && nextDur>0 && thisDur>=nextDur*3){ lastStage=task; continue; }
-    }
-    const phase = (map.stage>=0 ? (stage||lastStage) : lastStage) || "";
-    out.push([task, phase, cell(map.date), cell(map.dur), "", ""]);
+    const task=cell(map.task), stage=cell(map.stage);
+    if(map.stage>=0 && stage && !task){ raw.push({stageOnly:stage}); continue; }
+    if(!task) continue;
+    if(numCol>=0 && !cell(numCol) && !cell(map.date) && !durNum(cell(map.dur))){ raw.push({heading:task}); continue; }
+    raw.push({task,stage,start:toDate(cell(map.date)),end:toDate(cell(map.end)),dur:durNum(cell(map.dur)),
+              date:cell(map.date),durStr:cell(map.dur)});
   }
+  /* mark phase parents: a task whose date range [start,end] covers the NEXT task's start
+     (i.e. its bar spans the following tasks). Only when there's no explicit Stage column. */
+  let phasesFromParents=false;
+  if(map.stage<0){
+    /* rows often aren't date-sorted, so use duration: a phase parent is a row whose duration
+       is clearly longer than the run of tasks that follow it. Compute a threshold from the data. */
+    const durs=raw.filter(e=>e&&e.task).map(e=>e.dur).filter(d=>d>0);
+    if(durs.length){
+      const sorted=durs.slice().sort((a,b)=>a-b);
+      const median=sorted[Math.floor(sorted.length/2)]||1;
+      /* a parent is notably longer than typical (>= 4x median and >= 8 days),
+         which picks out summary bars like Site Prep(23), Concrete Slab(27), Frames&Truss(27) */
+      const thresh=Math.max(8, median*4);
+      raw.forEach(e=>{ if(e&&e.task&&e.dur>=thresh){ e.isParent=true; phasesFromParents=true; } });
+    }
+  }
+  /* build output, filling phase down from the most recent parent (or stage) */
+  let flaggedPhase=false;
+  for(let i=0;i<raw.length;i++){
+    const e=raw[i]; if(!e) continue;
+    if(e.stageOnly){ lastStage=e.stageOnly; continue; }
+    if(e.heading){ lastStage=e.heading; continue; }
+    if(!e.task) continue;
+    if(map.stage>=0 && e.stage) lastStage=e.stage;
+    if(e.isParent){ lastStage=e.task; }
+    const phase = (map.stage>=0 ? (e.stage||lastStage) : lastStage) || "";
+    if(phasesFromParents && phase) flaggedPhase=true;
+    out.push([e.task, phase, e.date||"", e.durStr||"", "", "", phasesFromParents?"__PHASEFLAG__":""]);
+  }
+  /* strip the marker column but remember whether to flag phases for review */
+  const flagPhases = out.some(r=>r[6]==="__PHASEFLAG__");
+  out.forEach(r=>{ if(r.length>6) r.length=6; });
+  if(flagPhases) out.__flagPhases=true;
   return out.length>1 ? out : null;
 }
 function detectTemplate(headers){
@@ -1503,12 +1548,12 @@ const HEADER_ALIASES={
   "Price_exGST":["priceexgst","priceexcgst","price","unitprice"],
   "Qty":["estimatedqty","qty","quantity","quantities","qtys","qtty","qnty","no","nos","number","count","itemcount","noofitems","numberofitems","noofunits","numberofunits","qtyrequired","orderqty","numberrequired","amountofitems"],
   "UOM":["uom","unit","units","unitofmeasure","unitofmeasurement"],
-  "Type":["type","costtype"],
+  "Type":["type","costtype","category","contacttype"],
   "Specification":["spec","specification","specs","notes"],
   "Markup":["markup","margin","markuppercent"],
   "Task_Name":["taskname","tasktitle"],
   "Due_Date":["duedate","deadline"],
-  "Trading_Name":["tradingname","businessname","companyname","name"],
+  "Trading_Name":["tradingname","businessname","companyname","name","contactbusinessname","contactbusiness","business","contact"],
   "Mobile":["mobile","mobilenumber","mobileno","cell"],
   "Phone":["phone","phonenumber","phoneno","telephone","tel"],
   "Suburb_Town":["suburbtown","suburb","town","city"],
@@ -1548,9 +1593,11 @@ function runCheck(){
   let tplKey=document.getElementById("tpl").value;
 
   /* ===== Raw schedule/Gantt? reshape it into the JACK schedule columns ===== */
+  let flagGanttPhases=false;
   if(tplKey==="job-schedules" || tplKey==="auto"){
     const reshaped=reshapeRawSchedule(parsed);
     if(reshaped){
+      flagGanttPhases=!!reshaped.__flagPhases;
       parsed.length=0; reshaped.forEach(r=>parsed.push(r));
       if(tplKey==="auto") tplKey="job-schedules";
     }
@@ -1970,6 +2017,27 @@ function runCheck(){
         else if(last){ r[pI]=last; cellFlags[ri+"_"+pI]="fixed"; filled++; }
       });
       if(filled>0) issues.push({row:-1,col:-1,level:"fixed",msg:"Filled "+filled+" blank Phase cell(s) down from the stage above"});
+      /* phases worked out from the Gantt bars (parent spans) are a best guess - flag them all
+         for review so the user can correct any the tool grouped wrong */
+      if(flagGanttPhases){
+        let n=0;
+        rows.forEach((r,ri)=>{ if(String(r[pI]||"").trim()){ cellFlags[ri+"_"+pI]="review"; n++; } });
+        if(n>0) issues.push({row:-1,col:-1,level:"review",msg:"Phase was worked out from the Gantt bars for "+n+" task(s) - please review the Phase column, some groupings may need fixing"});
+      }
+    }
+    /* flag exact-duplicate task rows (same Item_Name + Start_Date + Duration) so the user can
+       decide - per spec, intentional duplicates are kept, not auto-deleted */
+    const iI=headers.indexOf("Item_Name"), sdI=headers.indexOf("Start_Date"), dI=headers.indexOf("Duration");
+    if(iI>=0){
+      const seen={};
+      rows.forEach((r,ri)=>{
+        const key=[String(r[iI]||"").trim().toLowerCase(),String(r[sdI]||"").trim(),String(r[dI]||"").trim()].join("|");
+        if(!String(r[iI]||"").trim()) return;
+        if(seen[key]!==undefined){
+          cellFlags[ri+"_"+iI]="review";
+          issues.push({row:ri,col:iI,level:"review",msg:'"'+r[iI]+'" (row '+(ri+1)+') is an exact duplicate of row '+(seen[key]+1)+" - remove one if it wasn't intended"});
+        } else seen[key]=ri;
+      });
     }
   }
 
